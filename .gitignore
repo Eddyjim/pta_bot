@@ -8,3 +8,11 @@
 # Env
 .env
 .env.local
+
+# Node
+node_modules/
+dist/
+
+# Runtime
+*.db
+*.db-journal
