@@ -1,0 +1,27 @@
+[Unit]
+Description=PTA WhatsApp bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ptabot
+WorkingDirectory=/opt/pta-bot
+EnvironmentFile=/etc/pta-bot.env
+ExecStart=/usr/bin/node --max-old-space-size=384 dist/main.js
+Restart=always
+RestartSec=10
+# High enough that a WhatsApp-side outage does not rate-limit the unit into 'failed'.
+StartLimitBurst=100
+StartLimitIntervalSec=3600
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pta-bot
+
+[Install]
+WantedBy=multi-user.target
