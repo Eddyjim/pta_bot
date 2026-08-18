@@ -76,8 +76,9 @@ droplet. Not a product, not multi-tenant, never will be.
 
 ## Known open items
 
-- [ ] `build` must copy `src/db/migrations/*.sql` into `dist/db/` — tsc doesn't emit it,
-      and first boot fails without it.
+- [x] `build` must copy `src/db/migrations/*.sql` into `dist/db/` — tsc doesn't emit it,
+      and first boot fails without it. Fixed: `npm run build` now runs `tsc` then copies
+      the migrations directory.
 - [ ] `filter.ts` keyword list is a guess at Colombian school vocabulary. Log stage-1
       drop rate for two weeks and widen it; extraction cost has plenty of headroom.
 - [ ] `answerQuestion` has no rate limit. One parent spamming `@bot` is an unbounded

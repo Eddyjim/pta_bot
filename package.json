@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/db/migrations && cp src/db/migrations/*.sql dist/db/migrations/",
     "start": "node dist/main.js",
     "dev": "tsx watch src/main.ts",
     "migrate": "node dist/db/migrate.js"
@@ -23,6 +25,7 @@
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.9.0",
     "@types/node-cron": "^3.0.11",
+    "@types/qrcode-terminal": "^0.12.2",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }

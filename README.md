@@ -45,8 +45,8 @@ sudo systemctl enable --now pta-bot
 ```
 
 Build on your laptop, not on the droplet — `npm install` plus `tsc` will OOM a 512MB
-instance. `dist/db/migrations/*.sql` must be copied alongside the JS; add a
-`cp -r src/db/migrations dist/db/` step or a bundler copy plugin.
+instance. `npm run build` copies `src/db/migrations/*.sql` into `dist/db/migrations/`
+after `tsc` runs, so `dist` is deploy-ready as-is.
 
 ## Before you turn it on
 
