@@ -27,10 +27,15 @@ scale-to-zero.
 ## Setup
 
 ```bash
+nvm use                   # or otherwise ensure Node 20 or 22 — see below
 npm install
 cp .env.example .env      # fill in ADMIN_JID and ANTHROPIC_API_KEY
 npm run dev               # scan the QR with the dedicated prepaid handset
 ```
+
+Requires Node 20 or 22 (`.nvmrc` pins 22). Newer Node builds break `better-sqlite3`'s
+native module — no prebuilt binary, and compiling from source fails against V8 API
+changes.
 
 On first run the group JID appears in the logs once a message arrives. Put it in
 `GROUP_JID` and restart.

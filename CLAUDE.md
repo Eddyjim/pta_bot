@@ -68,6 +68,9 @@ droplet. Not a product, not multi-tenant, never will be.
 
 ## Environment
 
+- **Use Node 20 or 22, not later.** `better-sqlite3`'s native build breaks on newer
+  Node/V8 (no prebuilt binary, and compiling from source fails against V8 API changes).
+  `.nvmrc` pins 22; `engines.node` in `package.json` enforces the range.
 - All dates computed in `America/Bogota`. Never trust the host clock's TZ.
 - Colombian holidays are computed, not listed — Ley Emiliani shifts most of them to the
   following Monday. `util/dates.ts`. Verified: Reyes 2026-01-12, Ascensión 2026-05-18,
