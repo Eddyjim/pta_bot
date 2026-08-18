@@ -18,6 +18,7 @@ export const config = {
   logLevel: process.env.LOG_LEVEL ?? 'info',
   rawRetentionDays: Number(process.env.RAW_RETENTION_DAYS ?? 7),
   draftTtlHours: Number(process.env.DRAFT_TTL_HOURS ?? 12),
+  answerCooldownSeconds: Number(process.env.ANSWER_COOLDOWN_SECONDS ?? 60),
   optInKeyword: '#acepto',
   optOutKeyword: '#salir',
 } as const;

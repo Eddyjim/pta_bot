@@ -1,9 +1,9 @@
 import type { WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { config } from '../config.js';
 import { log } from '../logger.js';
-import { ingest } from '../ingest/pipeline.js';
+import { ingest, resolveParticipant } from '../ingest/pipeline.js';
 import { resolveReply } from '../outbox/index.js';
-import { answerQuestion } from '../extract/answer.js';
+import { answerQuestion, tryConsumeCooldown } from '../extract/answer.js';
 import { db } from '../db/index.js';
 
 function textOf(m: WAMessage): string {
@@ -47,6 +47,17 @@ async function route(sock: WASocket, m: WAMessage): Promise<void> {
   const mentioned = m.message?.extendedTextMessage?.contextInfo?.mentionedJid ?? [];
   const me = sock.user?.id.split(':')[0];
   if (me && mentioned.some(j => j.startsWith(me))) {
+    const sender = m.key.participant ?? chat;
+    const waitMs = tryConsumeCooldown(resolveParticipant(sender));
+    if (waitMs > 0) {
+      const waitSec = Math.ceil(waitMs / 1000);
+      await sock.sendMessage(
+        chat,
+        { text: `Una pregunta a la vez — intenta de nuevo en ${waitSec}s.` },
+        { quoted: m },
+      );
+      return;
+    }
     await sock.sendPresenceUpdate('composing', chat);
     const reply = await answerQuestion(textOf(m));
     await sock.sendMessage(chat, { text: reply }, { quoted: m });

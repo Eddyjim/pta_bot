@@ -84,8 +84,10 @@ droplet. Not a product, not multi-tenant, never will be.
       the migrations directory.
 - [ ] `filter.ts` keyword list is a guess at Colombian school vocabulary. Log stage-1
       drop rate for two weeks and widen it; extraction cost has plenty of headroom.
-- [ ] `answerQuestion` has no rate limit. One parent spamming `@bot` is an unbounded
-      API bill. Add a per-participant cooldown.
+- [x] `answerQuestion` has no rate limit. One parent spamming `@bot` is an unbounded
+      API bill. Fixed: `bot_mentions` table + `tryConsumeCooldown` in
+      `extract/answer.ts`, keyed on `participants.id` (never the JID). Default 60s,
+      `ANSWER_COOLDOWN_SECONDS`.
 - [ ] No tests. `filter.ts` and `dates.ts` are pure and should have them first.
 - [ ] Consider SQLCipher (`better-sqlite3-multiple-ciphers`) for encryption at rest.
 - [ ] Confirm current state of the `@lid` migration against Baileys' docs before launch —
