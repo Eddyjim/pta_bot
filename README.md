@@ -3,7 +3,8 @@
 WhatsApp assistant for a class parent group. Ingests group chat, extracts actionable
 facts nightly, and drafts reminders that **you approve before anything is posted**.
 
-Node 20+ · Baileys · SQLite · Claude Haiku · ~$8/mo on a $6 DigitalOcean droplet.
+Node 20+ · Baileys · SQLite · Claude Haiku · ~$8/mo on a $6 DigitalOcean droplet, or
+free on a Raspberry Pi at home.
 
 ## Architecture
 
@@ -40,7 +41,7 @@ changes.
 On first run the group JID appears in the logs once a message arrives. Put it in
 `GROUP_JID` and restart.
 
-### Deploy
+### Deploy: droplet
 
 ```bash
 npm run build
@@ -52,6 +53,34 @@ sudo systemctl enable --now pta-bot
 Build on your laptop, not on the droplet — `npm install` plus `tsc` will OOM a 512MB
 instance. `npm run build` copies `src/db/migrations/*.sql` into `dist/db/migrations/`
 after `tsc` runs, so `dist` is deploy-ready as-is.
+
+### Deploy: Raspberry Pi (home)
+
+A Pi 4 (2GB+) has enough RAM to build on-device — no laptop cross-build needed. Same
+outbound-only WSS connection as the droplet, so no port forwarding or static IP.
+
+```bash
+# On the Pi, 64-bit Raspberry Pi OS, Node 20 or 22 installed (nvm or nodesource):
+git clone <this repo> /opt/pta-bot && cd /opt/pta-bot
+npm install                          # builds better-sqlite3's native module here
+npm run build
+sudo useradd -r -s /usr/sbin/nologin ptabot
+sudo mkdir -p /var/lib/pta-bot && sudo chown ptabot:ptabot /var/lib/pta-bot
+sudo cp .env /etc/pta-bot.env        # DB_PATH=/var/lib/pta-bot/pta.db
+sudo cp systemd/pta-bot-pi.service /etc/systemd/system/
+sudo chown -R ptabot:ptabot /opt/pta-bot
+sudo systemctl enable --now pta-bot-pi
+```
+
+Two things that matter more at home than on a managed droplet:
+
+- **Boot from a USB SSD, not the SD card**, if you can. SQLite's WAL mode writes
+  continuously; SD cards wear out and corrupt under that pattern far sooner than an
+  SSD does.
+- **Power stability.** A UPS or even a basic surge-protected supply avoids the corrupt
+  writes and re-pairing hassle that come from an ungraceful shutdown mid-write. WAL +
+  `synchronous = NORMAL` (already set in `db/index.ts`) tolerates a crash, but avoiding
+  one is still better than recovering from one.
 
 ## Before you turn it on
 

@@ -1,6 +1,3 @@
-# Tuned for a 512MB droplet. Deploying to a Raspberry Pi (2GB+)? Use
-# systemd/pta-bot-pi.service instead — the memory cap below is too tight for no reason
-# once RAM isn't scarce.
 [Unit]
 Description=PTA WhatsApp bot
 After=network-online.target
@@ -11,7 +8,9 @@ Type=simple
 User=ptabot
 WorkingDirectory=/opt/pta-bot
 EnvironmentFile=/etc/pta-bot.env
-ExecStart=/usr/bin/node --max-old-space-size=384 dist/main.js
+# No --max-old-space-size: that cap on the droplet unit exists to leave headroom on a
+# 512MB box. A Pi 4 has at minimum 2GB, so let V8 size the heap itself.
+ExecStart=/usr/bin/node dist/main.js
 Restart=always
 RestartSec=10
 # High enough that a WhatsApp-side outage does not rate-limit the unit into 'failed'.

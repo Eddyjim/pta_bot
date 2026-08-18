@@ -7,8 +7,9 @@ Context for working on this repo. Read before changing anything in `src/ingest/`
 
 A WhatsApp assistant for a single Colombian class parent group (~25 parents). It reads
 group chat, extracts actionable facts nightly with an LLM, and drafts reminders that the
-PTA rep approves before anything is posted. Runs as one Node process on a $6 DigitalOcean
-droplet. Not a product, not multi-tenant, never will be.
+PTA rep approves before anything is posted. Runs as one Node process — a $6 DigitalOcean
+droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
+`systemd/pta-bot-pi.service`; see README). Not a product, not multi-tenant, never will be.
 
 ## Invariants — do not break these without explicit discussion
 
@@ -75,7 +76,8 @@ droplet. Not a product, not multi-tenant, never will be.
 - Colombian holidays are computed, not listed — Ley Emiliani shifts most of them to the
   following Monday. `util/dates.ts`. Verified: Reyes 2026-01-12, Ascensión 2026-05-18,
   Corpus 2026-06-08, Sagrado Corazón 2026-06-15.
-- Build on the laptop, not the droplet. `npm install` + `tsc` will OOM 512MB.
+- Build on the laptop, not the 512MB droplet — `npm install` + `tsc` will OOM it. A Pi 4
+  (2GB+) doesn't have this problem and can build on-device.
 
 ## Known open items
 
