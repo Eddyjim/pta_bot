@@ -6,9 +6,10 @@ import { bogotaDay } from '../util/dates.js';
 
 const client = new Anthropic({ apiKey: config.anthropicKey });
 
-/** Confidence below this never enters the knowledge base — it goes to your review DM. */
-const CONFIDENCE_FLOOR = 0.55;
-const AUTO_CONFIRM = 0.85;
+/** Confidence below this never enters the knowledge base — it goes to your review DM.
+ *  Shared with extract/email.ts so both extraction paths use the same bar. */
+export const CONFIDENCE_FLOOR = 0.55;
+export const AUTO_CONFIRM = 0.85;
 
 const EXTRACT_TOOL: Anthropic.Tool = {
   name: 'record_facts',
@@ -107,7 +108,7 @@ Reglas:
 - Es correcto devolver listas vacías. Prefiere no registrar nada antes que registrar algo dudoso.`;
 
 /** Strip anything phone-number-shaped before the text leaves the machine. */
-function scrub(text: string): string {
+export function scrub(text: string): string {
   return text
     .replace(/\+?\d[\d\s\-().]{7,}\d/g, '[num]')
     .replace(/\b\d{7,}\b/g, '[num]');

@@ -26,10 +26,18 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
    any storage. `CONSENT_MODE=optin` means `consent_state != 'granted'` drops the message
    entirely. Do not add a second path that stores "just for now".
 
-4. **Health content is dropped, never stored.** `HEALTH_PATTERNS` in `ingest/filter.ts`
-   is checked first and unconditionally. Health data is a *dato sensible* under Ley 1581
-   with a much higher consent bar. A derived database of which child has been ill is the
-   worst possible failure mode here.
+4. **Health content is dropped, never stored.** `HEALTH_PATTERNS` (exported as
+   `hasHealthContent` from `ingest/filter.ts`) is checked first and unconditionally for
+   any text-based input. Health data is a *dato sensible* under Ley 1581 with a much
+   higher consent bar. A derived database of which child has been ill is the worst
+   possible failure mode here.
+   **Exception, unavoidable:** `extract/email.ts`'s image path (photographed/screenshotted
+   newsletters) can't regex-check before the model sees the image — reading the image
+   *is* the API call. That path relies on the extraction prompt instructing the model to
+   never extract health content, plus a post-extraction `hasHealthContent` scan over
+   whatever text the model returns, before anything is stored. The raw photo itself
+   still reaches Anthropic's API regardless of content — there's no client-side
+   pre-filter possible for pixels the way there is for text.
 
 5. **No birth years.** `birthdays` stores first name + day + month only.
 

@@ -126,6 +126,15 @@ coverage loss outweighs the exposure — the gate is one branch in `ingest/pipel
 | reply with text | publish your text instead |
 | `/pendientes` | facts below the auto-confirm threshold |
 | `/cumple Sofía 14/03` | add a birthday |
+| `/correo <texto>` | extract reminders from a pasted email |
+| send a photo | extract reminders from a newsletter screenshot — no caption needed |
+
+Both `/correo` and the photo path extract into the same `facts` table the nightly chat
+extraction uses (so `/pendientes`, `@bot`, and the digest all see them too), and draft
+one reminder per extracted item for you to approve individually — same approval flow as
+everything else. See `CLAUDE.md` invariant 4 for the health-content caveat on the photo
+path: the image is sent to Anthropic's API regardless of what it contains, since there's
+no way to check it locally before the model reads it.
 
 ## What is deliberately missing
 
