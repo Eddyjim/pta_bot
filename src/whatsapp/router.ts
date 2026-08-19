@@ -1,9 +1,11 @@
 import type { WAMessage, WASocket } from '@whiskeysockets/baileys';
+import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { ingest, resolveParticipant } from '../ingest/pipeline.js';
 import { resolveReply } from '../outbox/index.js';
 import { answerQuestion, tryConsumeCooldown } from '../extract/answer.js';
+import { extractFromEmailText, extractFromEmailImage } from '../extract/email.js';
 import { db } from '../db/index.js';
 
 function textOf(m: WAMessage): string {
@@ -33,7 +35,23 @@ async function route(sock: WASocket, m: WAMessage): Promise<void> {
   if (chat === config.adminJid && !m.key.fromMe) {
     const quoted = m.message?.extendedTextMessage?.contextInfo?.stanzaId;
     if (quoted && await resolveReply(quoted, textOf(m))) return;
-    await handleAdminCommand(sock, textOf(m));
+
+    // Any photo you DM the bot is treated as a newsletter/email screenshot to mine
+    // for reminders — no caption required.
+    if (m.message?.imageMessage) {
+      await handleEmailImage(sock, m);
+      return;
+    }
+
+    const text = textOf(m);
+    if (/^\/correo\b/i.test(text.trim())) {
+      // Only strip the command token — the rest, including line breaks, is the
+      // pasted email body and must survive intact for extraction.
+      await handleEmailText(sock, text.trim().replace(/^\/correo\s*/i, ''));
+      return;
+    }
+
+    await handleAdminCommand(sock, text);
     return;
   }
 
@@ -80,8 +98,59 @@ async function handleAdminCommand(sock: WASocket, text: string): Promise<void> {
     case '/ayuda':
     default:
       await sock.sendMessage(config.adminJid, {
-        text: '/pendientes — hechos por confirmar\n/cumple <nombre> <dd/mm>\n/ayuda',
+        text: '/pendientes — hechos por confirmar\n/cumple <nombre> <dd/mm>\n' +
+              '/correo <texto> — extrae recordatorios de un correo pegado\n' +
+              'Envía una foto — extrae recordatorios de un boletín escaneado\n/ayuda',
       });
+  }
+}
+
+type EmailResult = Awaited<ReturnType<typeof extractFromEmailText>>;
+
+function summarizeEmailResult(result: EmailResult): string {
+  if (!result.ok) {
+    return '⚠️ Parece contener información de salud — no se procesó. Revísalo manualmente.';
+  }
+  if (result.draftCount === 0) {
+    return result.healthDropped > 0
+      ? '⚠️ Se descartó contenido por ser de salud. No quedó nada más para compartir.'
+      : 'No encontré nada accionable.';
+  }
+  const suffix = result.healthDropped > 0
+    ? ` (se descartó ${result.healthDropped} por ser de salud)`
+    : '';
+  return `Listo — ${result.draftCount} borrador(es) arriba para revisar${suffix}.`;
+}
+
+async function handleEmailText(sock: WASocket, body: string): Promise<void> {
+  if (!body.trim()) {
+    await sock.sendMessage(config.adminJid, { text: 'Uso: /correo seguido del texto del correo.' });
+    return;
+  }
+  await sock.sendMessage(config.adminJid, { text: '📧 Procesando correo...' });
+  try {
+    const result = await extractFromEmailText(body);
+    await sock.sendMessage(config.adminJid, { text: summarizeEmailResult(result) });
+  } catch (e) {
+    log.error({ e }, 'email text extraction failed');
+    await sock.sendMessage(config.adminJid, { text: 'No pude procesar el correo. Intenta de nuevo.' });
+  }
+}
+
+async function handleEmailImage(sock: WASocket, m: WAMessage): Promise<void> {
+  await sock.sendMessage(config.adminJid, { text: '📧 Procesando boletín...' });
+  try {
+    const buffer = await downloadMediaMessage(
+      m,
+      'buffer',
+      {},
+      { logger: log as any, reuploadRequest: sock.updateMediaMessage },
+    );
+    const result = await extractFromEmailImage(buffer, m.message?.imageMessage?.mimetype);
+    await sock.sendMessage(config.adminJid, { text: summarizeEmailResult(result) });
+  } catch (e) {
+    log.error({ e }, 'email image extraction failed');
+    await sock.sendMessage(config.adminJid, { text: 'No pude procesar la imagen. Intenta de nuevo.' });
   }
 }
 

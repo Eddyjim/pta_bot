@@ -12,6 +12,12 @@ const HEALTH_PATTERNS = [
   /\beps\b/i, /\bhospital/i, /\bmedicament/i, /\bcontagi/i, /\basma\b/i,
 ];
 
+/** Shared with extract/email.ts — the same hard-drop applies to any text about to be
+ *  stored or sent for extraction, not just chat messages. */
+export function hasHealthContent(text: string): boolean {
+  return HEALTH_PATTERNS.some(re => re.test(text));
+}
+
 const KEYWORDS = [
   'reuni', 'entrega', 'tarea', 'examen', 'evaluaci', 'traer', 'llevar', 'permiso',
   'salida', 'excursi', 'paseo', 'uniforme', 'lonchera', 'aporte', 'cuota', 'plata',
@@ -36,7 +42,7 @@ export function stage1(body: string | null | undefined, opts: { replyCount?: num
   if (text.length < 3) return { verdict: 'drop', reason: 'empty' };
 
   // Checked first and unconditionally — this must not be reachable around.
-  if (HEALTH_PATTERNS.some(re => re.test(text))) {
+  if (hasHealthContent(text)) {
     return { verdict: 'drop', reason: 'health' };
   }
 
