@@ -55,7 +55,16 @@ async function route(sock: WASocket, m: WAMessage): Promise<void> {
     return;
   }
 
-  if (chat !== config.groupJid) return;
+  if (chat !== config.groupJid) {
+    // Bootstrap aid: GROUP_JID starts empty (see config.ts) and there is otherwise no
+    // way to discover it. Only logs while unconfigured — once GROUP_JID is set, any
+    // other chat goes back to being silently ignored, same as everything else outside
+    // the admin/group scope.
+    if (!config.groupJid && chat.endsWith('@g.us') && !m.key.fromMe) {
+      log.info({ chat }, 'message from an unconfigured group — set GROUP_JID to this to start ingesting it');
+    }
+    return;
+  }
 
   // Hot path: local only, no network, sub-millisecond.
   ingest(m);

@@ -7,7 +7,12 @@ function req(name: string): string {
 }
 
 export const config = {
-  groupJid: req('GROUP_JID'),
+  // Optional at boot, unlike everything else req()'d here: on first run there IS no
+  // group JID yet — the documented flow is start the bot, let it log the JID once a
+  // group message arrives, then set this and restart. An empty string never matches a
+  // real JID, so router.ts's `chat !== config.groupJid` check safely ignores every
+  // group until this is set.
+  groupJid: process.env.GROUP_JID ?? '',
   adminJid: req('ADMIN_JID'),
   consentMode: (process.env.CONSENT_MODE ?? 'optin') as 'optin' | 'optout',
   anthropicKey: req('ANTHROPIC_API_KEY'),
