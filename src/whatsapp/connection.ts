@@ -5,6 +5,7 @@ import qrcode from 'qrcode-terminal';
 import { useSQLiteAuthState } from '../db/auth-state.js';
 import { heartbeat } from '../db/index.js';
 import { log } from '../logger.js';
+import { config } from '../config.js';
 
 let sock: WASocket | null = null;
 let attempt = 0;
@@ -36,6 +37,16 @@ export async function connect(
   });
 
   sock.ev.on('creds.update', saveCreds);
+
+  // Alternative to the QR when scanning isn't practical: type this code into the
+  // handset instead (WhatsApp > Linked Devices > Link with phone number). Self-guards
+  // on `registered` the same way the QR flow does — a no-op on every run after pairing
+  // actually succeeds, so PAIRING_NUMBER is harmless to leave set afterward.
+  if (config.pairingNumber && !sock.authState.creds.registered) {
+    sock.requestPairingCode(config.pairingNumber)
+      .then(code => log.warn({ code }, 'pairing code - enter this on the bot handset'))
+      .catch(e => log.error({ e }, 'failed to request pairing code'));
+  }
 
   sock.ev.on('connection.update', (u) => {
     const { connection, lastDisconnect, qr } = u;

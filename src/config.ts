@@ -24,6 +24,11 @@ export const config = {
   rawRetentionDays: Number(process.env.RAW_RETENTION_DAYS ?? 7),
   draftTtlHours: Number(process.env.DRAFT_TTL_HOURS ?? 12),
   answerCooldownSeconds: Number(process.env.ANSWER_COOLDOWN_SECONDS ?? 60),
+  // Alternative to scanning the QR: WhatsApp can pair by typing an 8-character code
+  // into the handset instead. Digits only, country code included, no '+' — e.g.
+  // 573001234567. Unset by default; harmless to leave set after pairing succeeds,
+  // since it's only ever used while the socket isn't yet registered.
+  pairingNumber: process.env.PAIRING_NUMBER,
   optInKeyword: '#acepto',
   optOutKeyword: '#salir',
 } as const;
