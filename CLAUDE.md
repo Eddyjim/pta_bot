@@ -46,6 +46,15 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
 
 7. **`DisconnectReason.loggedOut` and `connectionReplaced` are terminal** — exit, don't
    retry. `loggedOut` needs a physical QR scan; retrying looks like abuse.
+   **Enforced at the systemd layer too, not just in-process:** these two paths exit
+   `78`, and both unit files set `RestartPreventExitStatus=78`, so `Restart=always`
+   won't respawn through them. Before this, both exited `1` — indistinguishable from
+   any other fatal crash — so `Restart=always` retried them exactly like a transient
+   failure. Confirmed on real hardware (2026-08-21): a broken pairing attempt
+   crash-looped every ~10s, each cycle a fresh registration attempt against WhatsApp's
+   servers, until stopped by hand. If you add another exit path here, it needs its own
+   `process.exit(78)` (or a new code plus a matching `RestartPreventExitStatus` update)
+   — don't let it fall through to the generic `1` main.ts uses for unexpected fatals.
 
 8. **Only one instance may run.** Two processes sharing auth state fight, and it
    presents as random disconnects.

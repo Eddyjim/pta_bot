@@ -69,16 +69,23 @@ export async function connect(
 
       // TERMINAL. The pairing was revoked on the phone. Retrying looks like abuse
       // and will not work: recovery needs physical access to scan a new QR.
+      //
+      // Exit code 78 (not the generic 1 main.ts uses for unexpected fatals) is
+      // deliberate: systemd's Restart=always can't otherwise tell "don't ever retry
+      // this" apart from "retry me, this was transient" — it previously restarted
+      // through both identically. RestartPreventExitStatus=78 in the systemd units
+      // makes it actually stop here instead of hammering WhatsApp's servers with
+      // fresh registration attempts every RestartSec.
       if (code === DisconnectReason.loggedOut) {
         log.fatal('logged out - credentials revoked, re-pair required');
-        process.exit(1);
+        process.exit(78);
       }
 
       // Someone linked this number elsewhere, or a second instance is running.
       // Both are operator errors and both present as random dropouts if you retry.
       if (code === DisconnectReason.connectionReplaced) {
         log.fatal('connection replaced - another instance is using these creds');
-        process.exit(1);
+        process.exit(78);
       }
 
       if (stopped) return;
