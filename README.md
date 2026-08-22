@@ -40,7 +40,12 @@ changes.
 
 Can't scan a QR (e.g. pairing headless over SSH)? Set `PAIRING_NUMBER` in `.env` to the
 handset's number and the bot logs a code to type into WhatsApp > Linked Devices > Link
-with phone number instead.
+with phone number instead — **except this is currently broken** (confirmed against
+Baileys 6.7.24, 2026-08-21): the code is issued and the connection is closed by
+WhatsApp's server within ~100ms, before it can possibly be entered. See `.env.example`
+and `CLAUDE.md` for what happened when this was retried. For headless pairing over SSH,
+watch the QR live instead — `journalctl -u pta-bot-pi -f` in your own terminal, not
+relayed secondhand, since it expires within seconds.
 
 On first run the group JID appears in the logs once a message arrives. Put it in
 `GROUP_JID` and restart.
