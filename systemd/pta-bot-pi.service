@@ -2,6 +2,11 @@
 Description=PTA WhatsApp bot
 After=network-online.target
 Wants=network-online.target
+# High enough that a WhatsApp-side outage does not rate-limit the unit into 'failed'.
+# These belong in [Unit], not [Service] — misplaced here before, which systemd
+# silently ignored ("Unknown key... ignoring"), leaving restarts genuinely unbounded.
+StartLimitBurst=100
+StartLimitIntervalSec=3600
 
 [Service]
 Type=simple
@@ -13,9 +18,11 @@ EnvironmentFile=/etc/pta-bot.env
 ExecStart=/usr/bin/node dist/main.js
 Restart=always
 RestartSec=10
-# High enough that a WhatsApp-side outage does not rate-limit the unit into 'failed'.
-StartLimitBurst=100
-StartLimitIntervalSec=3600
+# connection.ts exits 78 for disconnect reasons that are genuinely terminal (loggedOut,
+# connectionReplaced) — retrying those is not transient-outage recovery, it's repeated
+# unofficial registration attempts against WhatsApp's servers. Respect that instead of
+# restarting through it: fix the pairing/credential problem by hand, then start again.
+RestartPreventExitStatus=78
 StandardOutput=journal
 StandardError=journal
 
