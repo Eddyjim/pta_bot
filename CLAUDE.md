@@ -111,6 +111,18 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
 - [ ] Consider SQLCipher (`better-sqlite3-multiple-ciphers`) for encryption at rest.
 - [ ] Confirm current state of the `@lid` migration against Baileys' docs before launch —
       it was still in flight and the `jid_type` handling may need updating.
+      **Partially confirmed on real hardware (2026-08-22):** it's broader than group
+      participants. The operator's own 1:1 DM chat with the bot also arrives as
+      `<digits>@lid`, not `<phone>@s.whatsapp.net` — so `ADMIN_JID` had to be set to the
+      `@lid` form for `chat === config.adminJid` to ever match; the phone-number form
+      silently matched nothing (every admin message just got dropped, indistinguishable
+      from no message arriving at all, until `router.ts`'s debug-level unmatched-DM log
+      was added to actually see it). `GROUP_JID` is unaffected — a group's own chat JID
+      is always `@g.us`; only 1:1/participant identifiers are subject to this. Still
+      open: `ADMIN_JID` only accepts one hardcoded value today, the same single-JID
+      fragility invariant 2 calls out for participants — worth the same
+      resolve-to-internal-id treatment if it flips again, rather than another manual
+      `.env` edit next time.
 - [ ] Health-pattern list is Spanish-only and keyword-based. It will miss things. It is
       a mitigation, not a guarantee — don't treat it as one.
 - [ ] `PAIRING_NUMBER` (pairing-code linking, `whatsapp/connection.ts`) is confirmed
