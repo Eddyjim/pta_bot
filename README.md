@@ -38,6 +38,10 @@ Requires Node 20 or 22 (`.nvmrc` pins 22). Newer Node builds break `better-sqlit
 native module — no prebuilt binary, and compiling from source fails against V8 API
 changes.
 
+Can't scan a QR (e.g. pairing headless over SSH)? Set `PAIRING_NUMBER` in `.env` to the
+handset's number and the bot logs a code to type into WhatsApp > Linked Devices > Link
+with phone number instead.
+
 On first run the group JID appears in the logs once a message arrives. Put it in
 `GROUP_JID` and restart.
 
