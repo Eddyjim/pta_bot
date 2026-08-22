@@ -104,6 +104,16 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
       it was still in flight and the `jid_type` handling may need updating.
 - [ ] Health-pattern list is Spanish-only and keyword-based. It will miss things. It is
       a mitigation, not a guarantee — don't treat it as one.
+- [ ] `PAIRING_NUMBER` (pairing-code linking, `whatsapp/connection.ts`) is confirmed
+      broken against Baileys 6.7.24 (tested 2026-08-21 on real hardware): the code is
+      issued, then WhatsApp's server closes the connection within ~100ms — before it
+      can possibly be entered. Repeated attempts (crash-looping via `Restart=always`)
+      appeared to trigger registration rate-limiting on the device: subsequent *plain
+      QR* attempts started failing the same way, having worked fine minutes earlier.
+      Do not retry this in a loop — each attempt is a real request against WhatsApp's
+      servers, and invariant 7's "retrying looks like abuse" concern applies here too,
+      not just to `loggedOut`. Leave `PAIRING_NUMBER` unset until a Baileys release is
+      confirmed to fix it; use the QR instead, watched live rather than relayed.
 
 ## Style
 
