@@ -32,7 +32,9 @@ async function route(sock: WASocket, m: WAMessage): Promise<void> {
   const chat = m.key.remoteJid;
   if (!chat) return;
 
-  if (chat === config.adminJid && !m.key.fromMe) {
+  if (chat === config.adminJid) {
+    if (m.key.fromMe) return; // our own outgoing messages, reflected back
+
     const quoted = m.message?.extendedTextMessage?.contextInfo?.stanzaId;
     if (quoted && await resolveReply(quoted, textOf(m))) return;
 
@@ -62,6 +64,12 @@ async function route(sock: WASocket, m: WAMessage): Promise<void> {
     // the admin/group scope.
     if (!config.groupJid && chat.endsWith('@g.us') && !m.key.fromMe) {
       log.info({ chat }, 'message from an unconfigured group — set GROUP_JID to this to start ingesting it');
+    } else if (!chat.endsWith('@g.us') && !m.key.fromMe) {
+      // A DM from someone other than ADMIN_JID gets no reply and, until now, no log
+      // either — a misconfigured ADMIN_JID (wrong format, wrong number) fails totally
+      // silently otherwise. Debug level: real stray DMs should be rare, and this isn't
+      // a bootstrap-only concern the way the group case above is.
+      log.debug({ chat }, 'DM from a non-admin JID, ignored');
     }
     return;
   }
