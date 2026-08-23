@@ -35,7 +35,7 @@ function purge(): void {
   log.info({ n }, 'raw messages purged');
 }
 
-function upcoming(fromDays: number, toDays: number) {
+export function upcoming(fromDays: number, toDays: number) {
   const from = bogotaDay(fromDays), to = bogotaDay(toDays);
   return db.prepare(
     `SELECT kind, payload, effective_date FROM facts
@@ -45,7 +45,7 @@ function upcoming(fromDays: number, toDays: number) {
   ).all(from, to) as any[];
 }
 
-function birthdaysWithin(days: number): string[] {
+export function birthdaysWithin(days: number): string[] {
   const out: string[] = [];
   for (let i = 0; i <= days; i++) {
     const iso = bogotaDay(i);
