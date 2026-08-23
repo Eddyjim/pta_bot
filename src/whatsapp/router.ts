@@ -15,6 +15,20 @@ function textOf(m: WAMessage): string {
   return msg?.conversation ?? msg?.extendedTextMessage?.text ?? '';
 }
 
+/**
+ * A JID referring to us can show up in either our phone-number form (sock.user.id) or
+ * our @lid form (sock.user.lid) — confirmed live 2026-08-23: group-participants.update
+ * lists the bot's own entry in @lid form, so checking only .id silently never matched
+ * and the group-welcome feature fired zero events, not even the non-admin debug log.
+ * This is invariant 2's "@lid migration" warning applying somewhere less obvious than
+ * group participants sending messages — it's how the bot is referred to as well.
+ */
+function isMyJid(sock: WASocket, jid: string): boolean {
+  const meId = sock.user?.id?.split(':')[0];
+  const meLid = sock.user?.lid?.split(':')[0];
+  return (!!meId && jid.startsWith(meId)) || (!!meLid && jid.startsWith(meLid));
+}
+
 const WELCOME_MESSAGE = `Hola 👋 Soy el asistente automático del salón.
 
 • Puedes preguntarme algo mencionándome (@) en cualquier mensaje — respondo con la
@@ -49,8 +63,14 @@ export function attachRouter(sock: WASocket): void {
   // messages.upsert's 'append'), so no idempotency guard is needed beyond this check.
   sock.ev.on('group-participants.update', async ({ id, participants, author, action }) => {
     try {
-      const me = sock.user?.id.split(':')[0];
-      if (!me || action !== 'add' || !participants.some(p => p.startsWith(me))) return;
+      if (action !== 'add') return;
+      if (!participants.some(p => isMyJid(sock, p))) {
+        // Debug, not silence: if this never fires for a real add-the-bot event again,
+        // that's the isMyJid check failing on some third JID form, not nothing
+        // happening — same diagnosability lesson as the non-admin-DM log below.
+        log.debug({ id, participants }, "group add doesn't include our own JID, ignored");
+        return;
+      }
 
       if (author !== config.adminJid) {
         log.debug({ id, author }, 'group add by non-admin, ignored');
@@ -117,8 +137,7 @@ async function route(sock: WASocket, m: WAMessage): Promise<void> {
   // The one synchronous LLM call. Mentions only — a bot that answers ambient
   // chatter is the fastest way to get itself muted by 25 people.
   const mentioned = m.message?.extendedTextMessage?.contextInfo?.mentionedJid ?? [];
-  const me = sock.user?.id.split(':')[0];
-  if (me && mentioned.some(j => j.startsWith(me))) {
+  if (mentioned.some(j => isMyJid(sock, j))) {
     const sender = m.key.participant ?? chat;
     const waitMs = tryConsumeCooldown(resolveParticipant(sender));
     if (waitMs > 0) {
