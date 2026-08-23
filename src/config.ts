@@ -29,6 +29,12 @@ export const config = {
   // 573001234567. Unset by default; harmless to leave set after pairing succeeds,
   // since it's only ever used while the socket isn't yet registered.
   pairingNumber: process.env.PAIRING_NUMBER,
+  // Restricts extract/email.ts to items relevant to this course. Unset = no filtering
+  // (backward compatible). School-wide newsletters often cover every grade in one
+  // document; this is meant for a single deployment's one class, not general-purpose
+  // grade parsing — see the system prompt in extract/email.ts for how variants like
+  // "2-A", "2A", "2nd A" are handled without enumerating every notation here.
+  courseName: process.env.COURSE_NAME,
   optInKeyword: '#acepto',
   optOutKeyword: '#salir',
 } as const;

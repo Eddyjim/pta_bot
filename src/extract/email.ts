@@ -9,6 +9,19 @@ import { CONFIDENCE_FLOOR, AUTO_CONFIRM, scrub } from './job.js';
 
 const client = new Anthropic({ apiKey: config.anthropicKey });
 
+/**
+ * Only meaningful when config.courseName is set (see buildSystem()) — otherwise the
+ * model has no target course to compare against and this defaults to true everywhere,
+ * which processExtraction() treats identically to the field being absent.
+ */
+const COURSE_RELEVANT_FIELD = {
+  type: 'boolean',
+  description:
+    'True unless this item explicitly names a course/grade other than the one given in ' +
+    'the system prompt. True when no course is mentioned at all (school-wide items) or ' +
+    'when in doubt.',
+} as const;
+
 const EXTRACT_TOOL: Anthropic.Tool = {
   name: 'record_email_facts',
   description:
@@ -29,6 +42,7 @@ const EXTRACT_TOOL: Anthropic.Tool = {
             location: { type: 'string' },
             confidence: { type: 'number', description: '0-1. Below 0.6 if the date was implied rather than stated.' },
             source_excerpt: { type: 'string', description: 'Verbatim, max 200 chars.' },
+            course_relevant: COURSE_RELEVANT_FIELD,
           },
           required: ['title', 'date', 'confidence', 'source_excerpt'],
         },
@@ -43,6 +57,7 @@ const EXTRACT_TOOL: Anthropic.Tool = {
             who_must_act: { type: 'string', enum: ['parents', 'students', 'unclear'] },
             confidence: { type: 'number' },
             source_excerpt: { type: 'string' },
+            course_relevant: COURSE_RELEVANT_FIELD,
           },
           required: ['what', 'due_date', 'confidence', 'source_excerpt'],
         },
@@ -57,6 +72,7 @@ const EXTRACT_TOOL: Anthropic.Tool = {
             due_date: { type: 'string' },
             confidence: { type: 'number' },
             source_excerpt: { type: 'string' },
+            course_relevant: COURSE_RELEVANT_FIELD,
           },
           required: ['purpose', 'confidence', 'source_excerpt'],
         },
@@ -69,6 +85,7 @@ const EXTRACT_TOOL: Anthropic.Tool = {
             statement: { type: 'string', description: 'What was communicated, in one sentence.' },
             confidence: { type: 'number' },
             source_excerpt: { type: 'string' },
+            course_relevant: COURSE_RELEVANT_FIELD,
           },
           required: ['statement', 'confidence', 'source_excerpt'],
         },
@@ -77,7 +94,21 @@ const EXTRACT_TOOL: Anthropic.Tool = {
   },
 };
 
-const SYSTEM = `Extraes información accionable de un correo o boletín semanal compartido por el
+function buildSystem(): string {
+  const courseNote = config.courseName ? `
+
+Este salón es "${config.courseName}". Los boletines a veces cubren varios cursos en un
+solo documento. Marca course_relevant=false SOLO en ítems que mencionen explícitamente
+OTRO curso o grado. Trata como equivalentes a "${config.courseName}" cualquier notación
+razonable del mismo grado y sección — por ejemplo "2do A", "2-A", "2A", "2° A",
+"segundo A", "grado 2A", "2nd A" son todas la misma cosa si el curso es "2nd A". Si
+solo se menciona el grado sin sección (p. ej. "2do" cuando el curso es "2nd A") y el
+boletín no distingue entre secciones, trátalo como relevante. Si un ítem no menciona
+ningún curso — anuncio general para todo el colegio — también es relevante. Ante la
+duda, deja course_relevant=true: es preferible mostrar de más que ocultar algo que sí
+aplicaba.` : '';
+
+  return `Extraes información accionable de un correo o boletín semanal compartido por el
 representante de un salón de clase en Colombia. El contenido puede llegar como texto pegado
 o como una imagen (foto o captura de pantalla) del boletín.
 
@@ -87,11 +118,12 @@ Reglas:
 - Ignora saludos, membretes, logos y contenido puramente informativo sin fecha, plazo,
   costo o decisión asociada.
 - NUNCA registres información de salud de ningún niño, aunque aparezca en el texto o la imagen.
-- Es correcto devolver listas vacías. Prefiere no registrar nada antes que registrar algo dudoso.`;
+- Es correcto devolver listas vacías. Prefiere no registrar nada antes que registrar algo dudoso.${courseNote}`;
+}
 
 type EmailExtractResult =
   | { ok: false; reason: 'health' }
-  | { ok: true; draftCount: number; healthDropped: number };
+  | { ok: true; draftCount: number; healthDropped: number; courseDropped: number };
 
 const IMAGE_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
@@ -135,10 +167,11 @@ const insertFact = () => db.prepare(
  * it IS the only guard: there's no text to regex until the model has already read the
  * photo, so this is what stands between a health-flagged extraction and storage.
  */
-export async function processExtraction(out: any): Promise<{ draftCount: number; healthDropped: number }> {
+export async function processExtraction(out: any): Promise<{ draftCount: number; healthDropped: number; courseDropped: number }> {
   const insert = insertFact();
   let draftCount = 0;
   let healthDropped = 0;
+  let courseDropped = 0;
 
   const kinds: Array<[string, any[], string | undefined]> = [
     ['event', out.events ?? [], 'date'],
@@ -150,6 +183,14 @@ export async function processExtraction(out: any): Promise<{ draftCount: number;
   for (const [kind, items, dateKey] of kinds) {
     for (const it of items) {
       if (it.confidence < CONFIDENCE_FLOOR) continue;
+      // course_relevant is only meaningful when courseName is configured — the model
+      // has nothing to compare against otherwise, and processExtraction() shouldn't
+      // silently start dropping items the moment courseName is unset (it defaults to
+      // true/absent in that case, same as if the field were never in the schema).
+      if (config.courseName && it.course_relevant === false) {
+        courseDropped++;
+        continue;
+      }
       if (textFieldsOf(it).some(hasHealthContent)) {
         healthDropped++;
         log.warn({ kind }, 'email item dropped: health content');
@@ -173,14 +214,14 @@ export async function processExtraction(out: any): Promise<{ draftCount: number;
     }
   }
 
-  return { draftCount, healthDropped };
+  return { draftCount, healthDropped, courseDropped };
 }
 
 function extractCall(content: Anthropic.MessageParam['content']): Promise<Anthropic.Message> {
   return client.messages.create({
     model: config.extractionModel,
     max_tokens: 4000,
-    system: SYSTEM,
+    system: buildSystem(),
     tools: [EXTRACT_TOOL],
     tool_choice: { type: 'tool', name: 'record_email_facts' },
     messages: [{ role: 'user', content }],
@@ -201,10 +242,10 @@ export async function extractFromEmailText(rawText: string): Promise<EmailExtrac
     { type: 'text', text: `Fecha de referencia: ${bogotaDay()}\n\nCorreo:\n${scrub(rawText)}` },
   ]);
   const out = toolInputOf(res);
-  if (!out) { log.error('email text extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0 }; }
+  if (!out) { log.error('email text extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0, courseDropped: 0 }; }
 
-  const { draftCount, healthDropped } = await processExtraction(out);
-  return { ok: true, draftCount, healthDropped };
+  const { draftCount, healthDropped, courseDropped } = await processExtraction(out);
+  return { ok: true, draftCount, healthDropped, courseDropped };
 }
 
 export async function extractFromEmailImage(image: Buffer, mimetype: string | null | undefined): Promise<EmailExtractResult> {
@@ -221,8 +262,8 @@ export async function extractFromEmailImage(image: Buffer, mimetype: string | nu
     },
   ]);
   const out = toolInputOf(res);
-  if (!out) { log.error('email image extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0 }; }
+  if (!out) { log.error('email image extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0, courseDropped: 0 }; }
 
-  const { draftCount, healthDropped } = await processExtraction(out);
-  return { ok: true, draftCount, healthDropped };
+  const { draftCount, healthDropped, courseDropped } = await processExtraction(out);
+  return { ok: true, draftCount, healthDropped, courseDropped };
 }

@@ -145,6 +145,10 @@ everything else. See `CLAUDE.md` invariant 4 for the health-content caveat on th
 path: the image is sent to Anthropic's API regardless of what it contains, since there's
 no way to check it locally before the model reads it.
 
+Set `COURSE_NAME` (e.g. `2nd A`) if the newsletters you share cover multiple grades —
+items about a different course get dropped before storage, never drafted. Leave it
+unset and nothing is filtered.
+
 ## What is deliberately missing
 
 - **No embeddings/vector store.** ~90 daily records plus ~200 facts fit in context.
