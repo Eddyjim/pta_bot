@@ -135,6 +135,8 @@ coverage loss outweighs the exposure — the gate is one branch in `ingest/pipel
 | reply with text | publish your text instead |
 | `/pendientes` | facts below the auto-confirm threshold |
 | `/cumple Sofía 14/03` | add a birthday |
+| `/cumples` | list every stored birthday, calendar order |
+| `/proximos` | reminders and birthdays coming up in the next 30 days |
 | `/correo <texto>` | extract reminders from a pasted email |
 | send a photo | extract reminders from a newsletter screenshot — no caption needed |
 

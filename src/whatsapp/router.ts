@@ -6,6 +6,8 @@ import { ingest, resolveParticipant } from '../ingest/pipeline.js';
 import { resolveReply } from '../outbox/index.js';
 import { answerQuestion, tryConsumeCooldown } from '../extract/answer.js';
 import { extractFromEmailText, extractFromEmailImage } from '../extract/email.js';
+import { upcoming, birthdaysWithin } from '../scheduler/index.js';
+import { formatSpanish } from '../util/dates.js';
 import { db } from '../db/index.js';
 
 function textOf(m: WAMessage): string {
@@ -112,10 +114,18 @@ async function handleAdminCommand(sock: WASocket, text: string): Promise<void> {
       await sock.sendMessage(config.adminJid, { text: addBirthday(name, date) });
       break;
     }
+    case '/cumples':
+      await sock.sendMessage(config.adminJid, { text: listAllBirthdays() });
+      break;
+    case '/proximos':
+      await sock.sendMessage(config.adminJid, { text: listUpcoming() });
+      break;
     case '/ayuda':
     default:
       await sock.sendMessage(config.adminJid, {
         text: '/pendientes — hechos por confirmar\n/cumple <nombre> <dd/mm>\n' +
+              '/cumples — lista todos los cumpleaños guardados\n' +
+              '/proximos — recordatorios y cumpleaños de los próximos 30 días\n' +
               '/correo <texto> — extrae recordatorios de un correo pegado\n' +
               'Envía una foto — extrae recordatorios de un boletín escaneado\n/ayuda',
       });
@@ -196,4 +206,32 @@ function addBirthday(name: string, date: string): string {
   db.prepare('INSERT INTO birthdays (child_name, day, month, created_at) VALUES (?,?,?,?)')
     .run(name, d, mo, Date.now());
   return `Listo: ${name} — ${d}/${mo}`;
+}
+
+/** Calendar order (month, then day), not insertion order — this is meant to read as a
+ *  usable year-round list, not a log of when each birthday was added. Bare d/mo, not
+ *  formatSpanish: these aren't tied to any specific year, so a weekday would be
+ *  meaningless (and formatSpanish always includes one). */
+function listAllBirthdays(): string {
+  const rows = db.prepare('SELECT child_name, day, month FROM birthdays ORDER BY month, day').all() as any[];
+  if (!rows.length) return 'No hay cumpleaños guardados.';
+  return rows.map(r => `🎂 ${r.child_name} — ${r.day}/${r.month}`).join('\n');
+}
+
+/** On-demand version of the daily/weekly digest's own upcoming()/birthdaysWithin() —
+ *  same confirmed-facts-only data, just a wider window and available whenever asked
+ *  instead of waiting for the scheduled time. */
+function listUpcoming(): string {
+  const items = upcoming(0, 30);
+  const bdays = birthdaysWithin(30);
+  if (!items.length && !bdays.length) return 'Nada próximo en los próximos 30 días.';
+
+  const lines = ['*📅 Próximos 30 días*', ''];
+  for (const it of items) {
+    const p = JSON.parse(it.payload);
+    lines.push(`• ${formatSpanish(it.effective_date)} — ${p.title ?? p.what ?? p.purpose}` +
+               (p.time ? ` (${p.time})` : ''));
+  }
+  if (bdays.length) lines.push('', ...bdays);
+  return lines.join('\n');
 }
