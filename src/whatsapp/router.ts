@@ -128,14 +128,17 @@ function summarizeEmailResult(result: EmailResult): string {
   if (!result.ok) {
     return '⚠️ Parece contener información de salud — no se procesó. Revísalo manualmente.';
   }
+
+  const notes: string[] = [];
+  if (result.healthDropped > 0) notes.push(`${result.healthDropped} por ser de salud`);
+  if (result.courseDropped > 0) notes.push(`${result.courseDropped} de otro curso`);
+
   if (result.draftCount === 0) {
-    return result.healthDropped > 0
-      ? '⚠️ Se descartó contenido por ser de salud. No quedó nada más para compartir.'
+    return notes.length
+      ? `⚠️ Se descartó ${notes.join(' y ')}. No quedó nada más para compartir.`
       : 'No encontré nada accionable.';
   }
-  const suffix = result.healthDropped > 0
-    ? ` (se descartó ${result.healthDropped} por ser de salud)`
-    : '';
+  const suffix = notes.length ? ` (se descartó ${notes.join(' y ')})` : '';
   return `Listo — ${result.draftCount} borrador(es) arriba para revisar${suffix}.`;
 }
 
