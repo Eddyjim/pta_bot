@@ -17,7 +17,7 @@ free on a Raspberry Pi at home.
      02:00 stage-2 extraction (LLM) → facts
      02:30 purge + incremental_vacuum
      03:00 encrypted snapshot → R2
-     06:00 digest draft → your DM
+     08:00 digest draft → your DM (DIGEST_HOUR)
      Sun 19:00 week-ahead draft
 ```
 
