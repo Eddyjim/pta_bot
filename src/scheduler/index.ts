@@ -13,7 +13,7 @@ const opts = { timezone: config.tz } as const;
 export function startScheduler(): void {
   cron.schedule('0 2 * * *', () => guard('extract', () => runExtraction()), opts);
   cron.schedule('30 2 * * *', () => guard('purge', purge), opts);
-  cron.schedule('0 6 * * *', () => guard('digest', dailyDigest), opts);
+  cron.schedule(`0 ${config.digestHour} * * *`, () => guard('digest', dailyDigest), opts);
   cron.schedule('0 19 * * 0', () => guard('weekly', weekAhead), opts);
   cron.schedule('*/15 * * * *', () => guard('expire', expireStale), opts);
 
