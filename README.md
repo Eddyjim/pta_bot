@@ -17,7 +17,7 @@ free on a Raspberry Pi at home.
      02:00 stage-2 extraction (LLM) → facts
      02:30 purge + incremental_vacuum
      03:00 encrypted snapshot → R2
-     06:00 digest draft → your DM
+     08:00 digest draft → your DM (DIGEST_HOUR)
      Sun 19:00 week-ahead draft
 ```
 
@@ -144,6 +144,10 @@ one reminder per extracted item for you to approve individually — same approva
 everything else. See `CLAUDE.md` invariant 4 for the health-content caveat on the photo
 path: the image is sent to Anthropic's API regardless of what it contains, since there's
 no way to check it locally before the model reads it.
+
+Set `COURSE_NAME` (e.g. `2nd A`) if the newsletters you share cover multiple grades —
+items about a different course get dropped before storage, never drafted. Leave it
+unset and nothing is filtered.
 
 ## What is deliberately missing
 

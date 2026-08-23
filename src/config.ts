@@ -6,6 +6,17 @@ function req(name: string): string {
   return v;
 }
 
+/** Number(garbage) is NaN, and Math.max(0, NaN) is still NaN — a plain clamp doesn't
+ *  actually protect against a non-numeric env var, so this checks explicitly. Also
+ *  guards Number('') === 0, a genuine JS footgun: DIGEST_HOUR= (blank, e.g. left over
+ *  from uncommenting the .env.example line without filling it in) would otherwise
+ *  silently become midnight instead of falling back to the documented default. */
+function clampHour(v: string | undefined, fallback: number): number {
+  if (!v || !v.trim()) return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(23, Math.max(0, Math.trunc(n))) : fallback;
+}
+
 export const config = {
   // Optional at boot, unlike everything else req()'d here: on first run there IS no
   // group JID yet — the documented flow is start the bot, let it log the JID once a
@@ -24,11 +35,21 @@ export const config = {
   rawRetentionDays: Number(process.env.RAW_RETENTION_DAYS ?? 7),
   draftTtlHours: Number(process.env.DRAFT_TTL_HOURS ?? 12),
   answerCooldownSeconds: Number(process.env.ANSWER_COOLDOWN_SECONDS ?? 60),
+  // Hour (0-23, America/Bogota) the daily digest fires. Clamped rather than trusted
+  // outright — an out-of-range or non-numeric value would otherwise silently produce
+  // an invalid cron expression in scheduler/index.ts.
+  digestHour: clampHour(process.env.DIGEST_HOUR, 8),
   // Alternative to scanning the QR: WhatsApp can pair by typing an 8-character code
   // into the handset instead. Digits only, country code included, no '+' — e.g.
   // 573001234567. Unset by default; harmless to leave set after pairing succeeds,
   // since it's only ever used while the socket isn't yet registered.
   pairingNumber: process.env.PAIRING_NUMBER,
+  // Restricts extract/email.ts to items relevant to this course. Unset = no filtering
+  // (backward compatible). School-wide newsletters often cover every grade in one
+  // document; this is meant for a single deployment's one class, not general-purpose
+  // grade parsing — see the system prompt in extract/email.ts for how variants like
+  // "2-A", "2A", "2nd A" are handled without enumerating every notation here.
+  courseName: process.env.COURSE_NAME,
   optInKeyword: '#acepto',
   optOutKeyword: '#salir',
 } as const;
