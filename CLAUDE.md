@@ -21,6 +21,16 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
    from phone-number JIDs to `@lid`. `participant_jids` maps JIDs → `participants.id`;
    everything downstream uses the internal id. Keying on a JID silently forks one parent
    into two people weeks later.
+   **Confirmed live (2026-08-23) that this also applies to the bot's own identity, not
+   just other participants':** `group-participants.update` listed the bot's own entry
+   using its `@lid` form, not `sock.user.id`'s phone-number form. `router.ts`'s
+   `isMyJid()` checks both `sock.user.id` and `sock.user.lid` for exactly this reason —
+   this bit both the group-welcome feature (fired zero events on a live add-the-bot
+   test, not even the non-admin debug log — the participants-match check itself
+   silently failed) and the pre-existing `@bot`-mention detection, which had the
+   identical single-form check and had never been exercised with real group traffic
+   before `GROUP_JID` was actually configured. If you add another spot that checks
+   "is this JID us," use `isMyJid()` — don't re-derive `sock.user.id.split(':')[0]`.
 
 3. **The consent gate is evaluated in exactly one place** — `ingest/pipeline.ts`, before
    any storage. `CONSENT_MODE=optin` means `consent_state != 'granted'` drops the message
