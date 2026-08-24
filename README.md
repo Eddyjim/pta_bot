@@ -103,18 +103,21 @@ When the admin sends `/activar <label> <curso>` in a group (see
 automatically and waits for replies — no manual copy-paste needed. **Nothing from a
 parent who has not replied `#acepto` is stored at all** (`CONSENT_MODE=optin`).
 
-> Hola a todos 👋 Para no perder información importante del salón (fechas, entregas,
-> aportes), voy a usar un asistente automático que me ayuda a organizar lo que se
-> comparte aquí y me recuerda lo que viene.
+> Hola 👋 Soy el asistente automático del salón.
 >
-> • Solo procesa mensajes de quienes respondan **#acepto**
-> • Los mensajes se borran a los 7 días; solo se guardan fechas y acuerdos
-> • No guarda información de salud de ningún niño
-> • Los cumpleaños se guardan solo con nombre y día/mes, sin año
-> • Nada se publica aquí sin que yo lo revise primero
-> • Pueden salir cuando quieran escribiendo **#salir** (borra sus mensajes)
+> • Puedes preguntarme algo mencionándome (@) en cualquier mensaje — respondo con la
+>   información que tengo registrada.
+> • Solo proceso mensajes de quienes respondan *#acepto* a este mensaje.
+> • Los mensajes se borran a los 7 días; solo se guardan fechas y acuerdos importantes.
+> • No guardo información de salud de ningún niño.
+> • Los cumpleaños se guardan solo con nombre y día/mes, sin año.
+> • Nada se publica aquí sin que el administrador lo revise primero.
+> • Puedes salir cuando quieras escribiendo *#salir* (borra tus mensajes).
 >
-> Usa la API de Anthropic (Claude) para procesar los textos.
+> Uso la API de Anthropic (Claude) para procesar los textos.
+
+(Verbatim — this is the `WELCOME_MESSAGE` constant in `src/whatsapp/router.ts`, not a
+paraphrase. If you edit the wire text, update this block too so they don't drift apart.)
 
 (An earlier version of this bot tried to auto-post this on the raw `group-participants.update`
 event fired when the admin added it to a group — reverted as broken on `@lid`-addressed
