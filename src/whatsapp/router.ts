@@ -241,14 +241,18 @@ function summarizeEmailResult(result: EmailResult): string {
   return `Listo — ${result.draftCount} borrador(es) arriba para revisar${suffix}.`;
 }
 
-async function handleEmailText(sock: WASocket, body: string): Promise<void> {
-  if (!body.trim()) {
-    await sock.sendMessage(config.adminJid, { text: 'Uso: /correo seguido del texto del correo.' });
+async function handleEmailText(sock: WASocket, registry: GroupRegistry, text: string): Promise<void> {
+  const [label, ...rest] = text.trim().split(/\s+/);
+  const body = rest.join(' ');
+  const group = label ? registry.findByLabel(label) : undefined;
+
+  if (!group || !body.trim()) {
+    await sock.sendMessage(config.adminJid, { text: 'Uso: /correo <label> <texto del correo>.' });
     return;
   }
   await sock.sendMessage(config.adminJid, { text: '📧 Procesando correo...' });
   try {
-    const result = await extractFromEmailText(body);
+    const result = await extractFromEmailText(group.db, group.courseName, group.jid, body);
     await sock.sendMessage(config.adminJid, { text: summarizeEmailResult(result) });
   } catch (e) {
     log.error({ e }, 'email text extraction failed');
@@ -256,7 +260,14 @@ async function handleEmailText(sock: WASocket, body: string): Promise<void> {
   }
 }
 
-async function handleEmailImage(sock: WASocket, m: WAMessage): Promise<void> {
+async function handleEmailImage(sock: WASocket, registry: GroupRegistry, m: WAMessage): Promise<void> {
+  const caption = m.message?.imageMessage?.caption?.trim();
+  const group = caption ? registry.findByLabel(caption) : undefined;
+
+  if (!group) {
+    await sock.sendMessage(config.adminJid, { text: 'Envía la foto con el label del grupo como pie de foto.' });
+    return;
+  }
   await sock.sendMessage(config.adminJid, { text: '📧 Procesando boletín...' });
   try {
     const buffer = await downloadMediaMessage(
@@ -265,7 +276,7 @@ async function handleEmailImage(sock: WASocket, m: WAMessage): Promise<void> {
       {},
       { logger: log as any, reuploadRequest: sock.updateMediaMessage },
     );
-    const result = await extractFromEmailImage(buffer, m.message?.imageMessage?.mimetype);
+    const result = await extractFromEmailImage(group.db, group.courseName, group.jid, buffer, m.message?.imageMessage?.mimetype);
     await sock.sendMessage(config.adminJid, { text: summarizeEmailResult(result) });
   } catch (e) {
     log.error({ e }, 'email image extraction failed');
