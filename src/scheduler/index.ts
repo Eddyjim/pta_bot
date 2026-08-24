@@ -1,3 +1,4 @@
+import type { Database } from 'better-sqlite3';
 import cron from 'node-cron';
 import { db } from '../db/index.js';
 import { config } from '../config.js';
@@ -35,7 +36,7 @@ function purge(): void {
   log.info({ n }, 'raw messages purged');
 }
 
-export function upcoming(fromDays: number, toDays: number) {
+export function upcoming(db: Database, fromDays: number, toDays: number) {
   const from = bogotaDay(fromDays), to = bogotaDay(toDays);
   return db.prepare(
     `SELECT kind, payload, effective_date FROM facts
@@ -45,7 +46,7 @@ export function upcoming(fromDays: number, toDays: number) {
   ).all(from, to) as any[];
 }
 
-export function birthdaysWithin(days: number): string[] {
+export function birthdaysWithin(db: Database, days: number): string[] {
   const out: string[] = [];
   for (let i = 0; i <= days; i++) {
     const iso = bogotaDay(i);
