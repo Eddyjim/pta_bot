@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { db } from '../db/index.js';
+import type { Database } from 'better-sqlite3';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { bogotaDay } from '../util/dates.js';
@@ -114,7 +114,7 @@ export function scrub(text: string): string {
     .replace(/\b\d{7,}\b/g, '[num]');
 }
 
-export async function runExtraction(day = bogotaDay(-1)): Promise<void> {
+export async function runExtraction(db: Database, day = bogotaDay(-1)): Promise<void> {
   const rows = db
     .prepare(
       `SELECT m.id, m.ts, m.body, p.pseudonym
