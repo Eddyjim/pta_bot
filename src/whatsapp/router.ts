@@ -9,7 +9,6 @@ import { answerQuestion, tryConsumeCooldown } from '../extract/answer.js';
 import { extractFromEmailText, extractFromEmailImage } from '../extract/email.js';
 import { upcoming, birthdaysWithin } from '../scheduler/index.js';
 import { formatSpanish } from '../util/dates.js';
-import { db } from '../db/index.js';
 import { GroupRegistry, type GroupContext } from '../groups.js';
 
 const WELCOME_MESSAGE = `Hola 👋 Soy el asistente automático del salón.
