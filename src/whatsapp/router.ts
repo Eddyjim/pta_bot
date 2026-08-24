@@ -29,19 +29,6 @@ function isMyJid(sock: WASocket, jid: string): boolean {
   return (!!meId && jid.startsWith(meId)) || (!!meLid && jid.startsWith(meLid));
 }
 
-const WELCOME_MESSAGE = `Hola 👋 Soy el asistente automático del salón.
-
-• Puedes preguntarme algo mencionándome (@) en cualquier mensaje — respondo con la
-  información que tengo registrada.
-• Solo proceso mensajes de quienes respondan *#acepto* a este mensaje.
-• Los mensajes se borran a los 7 días; solo se guardan fechas y acuerdos importantes.
-• No guardo información de salud de ningún niño.
-• Los cumpleaños se guardan solo con nombre y día/mes, sin año.
-• Nada se publica aquí sin que el administrador lo revise primero.
-• Puedes salir cuando quieras escribiendo *#salir* (borra tus mensajes).
-
-Uso la API de Anthropic (Claude) para procesar los textos.`;
-
 export function attachRouter(sock: WASocket): void {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     // 'append' is history replay on reconnect. Ingesting it re-extracts weeks of
@@ -53,34 +40,6 @@ export function attachRouter(sock: WASocket): void {
       // One bad message must never kill the event loop for the rest of the batch.
       try { await route(sock, m); }
       catch (e) { log.error({ e, id: m.key.id }, 'route failed'); }
-    }
-  });
-
-  // Only the admin adding the bot triggers the welcome/consent message and the
-  // bootstrap JID log below — anyone else adding it (a stray add to an unrelated
-  // group) should not put the bot into "installation mode" there. group-participants
-  // updates are live protocol events with no history-replay equivalent (unlike
-  // messages.upsert's 'append'), so no idempotency guard is needed beyond this check.
-  sock.ev.on('group-participants.update', async ({ id, participants, author, action }) => {
-    try {
-      if (action !== 'add') return;
-      if (!participants.some(p => isMyJid(sock, p))) {
-        // Debug, not silence: if this never fires for a real add-the-bot event again,
-        // that's the isMyJid check failing on some third JID form, not nothing
-        // happening — same diagnosability lesson as the non-admin-DM log below.
-        log.debug({ id, participants }, "group add doesn't include our own JID, ignored");
-        return;
-      }
-
-      if (author !== config.adminJid) {
-        log.debug({ id, author }, 'group add by non-admin, ignored');
-        return;
-      }
-
-      log.info({ id }, 'bot added to group by admin — set GROUP_JID to this to start ingesting it');
-      await sock.sendMessage(id, { text: WELCOME_MESSAGE });
-    } catch (e) {
-      log.error({ e, id }, 'group-participants.update handling failed');
     }
   });
 }
