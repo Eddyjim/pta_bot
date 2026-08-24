@@ -173,33 +173,50 @@ async function handleUnregisteredGroup(
   await sock.sendMessage(chat, { text: WELCOME_MESSAGE });
 }
 
-async function handleAdminCommand(sock: WASocket, text: string): Promise<void> {
-  const [cmd, ...rest] = text.trim().split(/\s+/);
+async function handleAdminCommand(sock: WASocket, registry: GroupRegistry, text: string): Promise<void> {
+  const [cmd, label, ...rest] = text.trim().split(/\s+/);
   const arg = rest.join(' ');
+
+  const requireGroup = (): GroupContext | null => {
+    const group = label ? registry.findByLabel(label) : undefined;
+    return group ?? null;
+  };
+
   switch (cmd.toLowerCase()) {
-    case '/pendientes':
-      await sock.sendMessage(config.adminJid, { text: listUnconfirmed() });
-      break;
-    case '/cumple': {
-      // /cumple Sofía 14/03
-      const [name, date] = arg.split(/\s+/);
-      await sock.sendMessage(config.adminJid, { text: addBirthday(name, date) });
+    case '/pendientes': {
+      const group = requireGroup();
+      if (!group) { await sock.sendMessage(config.adminJid, { text: 'Uso: /pendientes <label>' }); break; }
+      await sock.sendMessage(config.adminJid, { text: listUnconfirmed(group.db) });
       break;
     }
-    case '/cumples':
-      await sock.sendMessage(config.adminJid, { text: listAllBirthdays() });
+    case '/cumple': {
+      // /cumple <label> <nombre> <dd/mm>
+      const group = requireGroup();
+      if (!group) { await sock.sendMessage(config.adminJid, { text: 'Uso: /cumple <label> <nombre> <dd/mm>' }); break; }
+      const [name, date] = arg.split(/\s+/);
+      await sock.sendMessage(config.adminJid, { text: addBirthday(group.db, name, date) });
       break;
-    case '/proximos':
-      await sock.sendMessage(config.adminJid, { text: listUpcoming() });
+    }
+    case '/cumples': {
+      const group = requireGroup();
+      if (!group) { await sock.sendMessage(config.adminJid, { text: 'Uso: /cumples <label>' }); break; }
+      await sock.sendMessage(config.adminJid, { text: listAllBirthdays(group.db) });
       break;
+    }
+    case '/proximos': {
+      const group = requireGroup();
+      if (!group) { await sock.sendMessage(config.adminJid, { text: 'Uso: /proximos <label>' }); break; }
+      await sock.sendMessage(config.adminJid, { text: listUpcoming(group.db) });
+      break;
+    }
     case '/ayuda':
     default:
       await sock.sendMessage(config.adminJid, {
-        text: '/pendientes — hechos por confirmar\n/cumple <nombre> <dd/mm>\n' +
-              '/cumples — lista todos los cumpleaños guardados\n' +
-              '/proximos — recordatorios y cumpleaños de los próximos 30 días\n' +
-              '/correo <texto> — extrae recordatorios de un correo pegado\n' +
-              'Envía una foto — extrae recordatorios de un boletín escaneado\n/ayuda',
+        text: '/pendientes <label> — hechos por confirmar\n/cumple <label> <nombre> <dd/mm>\n' +
+              '/cumples <label> — lista todos los cumpleaños guardados\n' +
+              '/proximos <label> — recordatorios y cumpleaños de los próximos 30 días\n' +
+              '/correo <label> <texto> — extrae recordatorios de un correo pegado\n' +
+              'Envía una foto con el label como pie de foto — extrae recordatorios de un boletín escaneado\n/ayuda',
       });
   }
 }
@@ -256,7 +273,7 @@ async function handleEmailImage(sock: WASocket, m: WAMessage): Promise<void> {
   }
 }
 
-function listUnconfirmed(): string {
+function listUnconfirmed(db: Database): string {
   const rows = db.prepare(
     `SELECT id, kind, payload, confidence FROM facts
       WHERE status = 'unconfirmed' ORDER BY created_at DESC LIMIT 10`,
@@ -269,33 +286,25 @@ function listUnconfirmed(): string {
   }).join('\n');
 }
 
-function addBirthday(name: string, date: string): string {
+function addBirthday(db: Database, name: string, date: string): string {
   if (!name || !/^\d{1,2}\/\d{1,2}$/.test(date ?? '')) {
-    return 'Uso: /cumple <nombre> <dd/mm>';
+    return 'Uso: /cumple <label> <nombre> <dd/mm>';
   }
   const [d, mo] = date.split('/').map(Number);
-  // Deliberately no year stored.
   db.prepare('INSERT INTO birthdays (child_name, day, month, created_at) VALUES (?,?,?,?)')
     .run(name, d, mo, Date.now());
   return `Listo: ${name} — ${d}/${mo}`;
 }
 
-/** Calendar order (month, then day), not insertion order — this is meant to read as a
- *  usable year-round list, not a log of when each birthday was added. Bare d/mo, not
- *  formatSpanish: these aren't tied to any specific year, so a weekday would be
- *  meaningless (and formatSpanish always includes one). */
-function listAllBirthdays(): string {
+function listAllBirthdays(db: Database): string {
   const rows = db.prepare('SELECT child_name, day, month FROM birthdays ORDER BY month, day').all() as any[];
   if (!rows.length) return 'No hay cumpleaños guardados.';
   return rows.map(r => `🎂 ${r.child_name} — ${r.day}/${r.month}`).join('\n');
 }
 
-/** On-demand version of the daily/weekly digest's own upcoming()/birthdaysWithin() —
- *  same confirmed-facts-only data, just a wider window and available whenever asked
- *  instead of waiting for the scheduled time. */
-function listUpcoming(): string {
-  const items = upcoming(0, 30);
-  const bdays = birthdaysWithin(30);
+function listUpcoming(db: Database): string {
+  const items = upcoming(db, 0, 30);
+  const bdays = birthdaysWithin(db, 30);
   if (!items.length && !bdays.length) return 'Nada próximo en los próximos 30 días.';
 
   const lines = ['*📅 Próximos 30 días*', ''];
