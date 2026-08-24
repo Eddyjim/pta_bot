@@ -168,21 +168,62 @@ One bot process, one WhatsApp connection, one admin — but any number of regist
 groups, each with fully isolated data (own participants, consent state, facts,
 birthdays, drafts). Add the bot to a new WhatsApp group, then have its admin send
 `/activar <label> <curso>` (e.g. `/activar 2ndA 2nd A`) as a plain message in that
-group. `label` is a short, whitespace-free token you choose — it's what every admin
-command above takes as its first argument to say which group's data to act on.
-`curso` is everything after the label, verbatim (e.g. `2nd A`), used to filter the
-`/correo` and photo-newsletter extraction to that class; a group can be registered
-with no `curso` if it only ever receives newsletters for that one class.
+group. `label` is a short token you choose (letters, digits, `_`, `-`, 1-32
+characters — it becomes part of that group's SQLite filename, `group-<label>.db`,
+so anything else, including `/`, is rejected with a usage error) — it's what every
+admin command above takes as its first argument to say which group's data to act
+on. `curso` is everything after the label, verbatim (e.g. `2nd A`), used to filter
+the `/correo` and photo-newsletter extraction to that class; a group can be
+registered with no `curso` if it only ever receives newsletters for that one class.
 
 Registration takes effect immediately, no restart: on success the bot replies in
-that group with the consent/welcome message. Sending `/activar` again in an
-already-registered group, or with a `label` another group already has, gets a
-clear error reply instead of silently re-registering or renaming anything.
+that group with the consent/welcome message. Sending `/activar` with a `label`
+another group already has gets a clear error reply instead of silently renaming
+anything. Sending `/activar` again in an already-registered group does not
+re-register it or reset its data — it replies `ya está activado como "<label>"`
+and updates that group's `curso` to whatever you just sent, which is also how you
+set `curso` on a group that was created without one, including one moved over by
+the [upgrade migration script](#upgrading-an-existing-single-group-deployment)
+(the old single-group schema never stored a course name at all).
 
 Every parent's consent is scoped to the group they're in — accepting in one group
 never opts them into another. See `docs/superpowers/specs/2026-08-23-multi-group-support-design.md`
 for the full design and why groups get separate SQLite files rather than a shared
 one with a `group_id` column.
+
+## Upgrading an existing single-group deployment
+
+If you're running an older version of this bot with the single `pta.db` file and a
+`GROUP_JID` env var, `scripts/migrate-to-multigroup.mjs` splits that into the new
+`bot.db` (auth_state, heartbeat, group registry) plus one `group-<label>.db` per
+group layout. **Verify against a copy first — this touches your only copy of the
+WhatsApp pairing, and re-pairing needs a physical QR scan.**
+
+1. Stop the service (`systemctl stop pta-bot` / `pta-bot-pi`) and copy `pta.db` off
+   the device somewhere you can experiment safely.
+2. Run the script against that **copy**, not the live file, with `OLD_GROUP_JID` set
+   to your current `GROUP_JID` value (the old schema never stored the group JID
+   anywhere queryable — it only ever lived in that env var):
+   ```bash
+   OLD_GROUP_JID='<your current GROUP_JID>' \
+     node scripts/migrate-to-multigroup.mjs /path/to/copy/pta.db /tmp/migration-test/data <label>
+   ```
+3. Sanity-check the row counts (`sqlite3 .../group-<label>.db "SELECT COUNT(*) FROM messages;"`,
+   `... FROM facts;`), then do the verification that actually matters: point a
+   throwaway config's `DB_DIR` at `/tmp/migration-test/data` and start the built app
+   against the copy. Confirm it reconnects using the migrated `auth_state` with **no
+   QR / re-pairing prompt** — that's the real acceptance test, and it can only be
+   observed by watching the connection log, not by the script alone.
+4. Only once that round-trips cleanly: run the same command for real against the
+   live `pta.db`, point `DB_DIR` at the new data directory in your service's env
+   file, and start the service.
+5. Once you've confirmed the service is healthy against the new layout (a day or
+   two of normal operation), remove the old `pta.db` and the now-unused `DB_PATH` /
+   `GROUP_JID` env vars.
+
+The migrated group is created with `course_name` left `NULL` (the old schema never
+stored one) — set it by sending `/activar <label> <curso>` in that group once
+you're back up, per [Multiple groups](#multiple-groups) above.
 
 ## What is deliberately missing
 
