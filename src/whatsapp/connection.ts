@@ -1,15 +1,17 @@
+import type Database from 'better-sqlite3';
 import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import type { WASocket } from '@whiskeysockets/baileys';
 import type { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import { useSQLiteAuthState } from '../db/auth-state.js';
-import { heartbeat } from '../db/index.js';
+import { heartbeat, botHeartbeat } from '../db/index.js';
 import { log } from '../logger.js';
 import { config } from '../config.js';
 
 let sock: WASocket | null = null;
 let attempt = 0;
 let stopped = false;
+let botDb: Database.Database | null = null;
 
 export const getSock = (): WASocket => {
   if (!sock) throw new Error('socket not connected');
@@ -23,8 +25,11 @@ function backoffMs(n: number): number {
 
 export async function connect(
   onReady: (sock: WASocket) => void,
+  db?: Database.Database,
 ): Promise<void> {
-  const { state, saveCreds } = useSQLiteAuthState();
+  if (db) botDb = db;
+  if (!botDb) throw new Error('botDb required for connect()');
+  const { state, saveCreds } = useSQLiteAuthState(botDb);
   const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
@@ -58,13 +63,13 @@ export async function connect(
 
     if (connection === 'open') {
       attempt = 0;
-      heartbeat(true);
+      if (botDb) botHeartbeat(botDb, true);
       log.info('connected');
       onReady(sock!);
     }
 
     if (connection === 'close') {
-      heartbeat(false);
+      if (botDb) botHeartbeat(botDb, false);
       const code = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
 
       // TERMINAL. The pairing was revoked on the phone. Retrying looks like abuse

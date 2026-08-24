@@ -1,6 +1,6 @@
+import type Database from 'better-sqlite3';
 import { BufferJSON, initAuthCreds, proto } from '@whiskeysockets/baileys';
 import type { AuthenticationCreds, AuthenticationState, SignalDataTypeMap } from '@whiskeysockets/baileys';
-import { db } from './index.js';
 
 /**
  * Baileys ships `useMultiFileAuthState`, which scatters creds + signal keys across a
@@ -8,7 +8,7 @@ import { db } from './index.js';
  * the pairing too — otherwise losing the volume means re-pairing by QR against the
  * physical prepaid handset, which is the one recovery step you cannot do remotely.
  */
-export function useSQLiteAuthState(): {
+export function useSQLiteAuthState(db: Database.Database): {
   state: AuthenticationState;
   saveCreds: () => void;
 } {
