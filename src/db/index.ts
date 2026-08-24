@@ -58,9 +58,3 @@ export function botHeartbeat(db: Database.Database, socketOpen: boolean): void {
   db.prepare('UPDATE heartbeat SET last_seen = ?, socket_open = ? WHERE id = 1')
     .run(Date.now(), socketOpen ? 1 : 0);
 }
-
-/** @deprecated - TODO Task 10: update connection.ts to pass botDb and use botHeartbeat directly */
-export function heartbeat(_socketOpen: boolean): void {
-  // Stub for backward compatibility during multi-group migration.
-  // Real implementation requires botDb wiring in connect().
-}
