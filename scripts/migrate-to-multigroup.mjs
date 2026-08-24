@@ -66,9 +66,11 @@ const botDb = new Database(botDbPath);
 // in whatever auto_vacuum value was in effect at that moment -- 0 (OFF) by
 // default -- and no pragma after that point can change it short of a full VACUUM.
 // Verified empirically while writing this script: setting auto_vacuum right after
-// journal_mode (the literal order src/db/index.ts's openAndTune() uses) leaves
-// `PRAGMA auto_vacuum` reading 0 forever, even though CREATE TABLE hasn't run yet.
-// Setting it first, before journal_mode, is what actually makes it stick.
+// journal_mode leaves `PRAGMA auto_vacuum` reading 0 forever, even though CREATE
+// TABLE hasn't run yet. Setting it first, before journal_mode, is what actually
+// makes it stick. src/db/index.ts's openAndTune() had this same ordering bug and
+// was fixed to match (see git history) -- this script manages its own Database
+// instances rather than calling openAndTune(), so it needed the fix applied here too.
 botDb.pragma('auto_vacuum = INCREMENTAL');
 botDb.pragma('journal_mode = WAL');
 applyMigrations(botDb, join(here, '..', 'src', 'db', 'migrations', 'bot'));

@@ -27,11 +27,15 @@ function applyMigrations(db: Database.Database, migrationsDir: string): void {
 
 function openAndTune(path: string): Database.Database {
   const db = new Database(path);
+  // auto_vacuum must be set before journal_mode = WAL: sqlite only honors an
+  // auto_vacuum change while the journal mode is still the rollback-journal
+  // default. Set it any later (even in the same connection, before any table
+  // is created) and PRAGMA auto_vacuum silently stays 0 (off) forever.
+  db.pragma('auto_vacuum = INCREMENTAL');
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
-  db.pragma('auto_vacuum = INCREMENTAL');
   return db;
 }
 
