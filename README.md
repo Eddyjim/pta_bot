@@ -1,7 +1,9 @@
 # pta-bot
 
-WhatsApp assistant for a class parent group. Ingests group chat, extracts actionable
+WhatsApp assistant for class parent groups. Ingests group chat, extracts actionable
 facts nightly, and drafts reminders that **you approve before anything is posted**.
+One bot process and one admin cover any number of registered groups — see
+[Multiple groups](#multiple-groups).
 
 Node 20+ · Baileys · SQLite · Claude Haiku · ~$8/mo on a $6 DigitalOcean droplet, or
 free on a Raspberry Pi at home.
@@ -21,8 +23,10 @@ free on a Raspberry Pi at home.
      Sun 19:00 week-ahead draft
 ```
 
-One process, one SQLite file, one restart unit. Serverless is not an option: Baileys
-holds a persistent WSS connection and Signal session state that cannot survive
+One process, one restart unit, one SQLite file per registered group plus one
+bot-level file for the WhatsApp pairing and group registry (see
+[Multiple groups](#multiple-groups)). Serverless is not an option: Baileys holds a
+persistent WSS connection and Signal session state that cannot survive
 scale-to-zero.
 
 ## Setup
@@ -47,8 +51,9 @@ and `CLAUDE.md` for what happened when this was retried. For headless pairing ov
 watch the QR live instead — `journalctl -u pta-bot-pi -f` in your own terminal, not
 relayed secondhand, since it expires within seconds.
 
-On first run the group JID appears in the logs once a message arrives. Put it in
-`GROUP_JID` and restart.
+New groups register themselves: add the bot to the group, then have the admin
+send `/activar <label> <curso>` in that group (e.g. `/activar 2ndA 2nd A`). The
+bot replies with the consent/welcome message immediately — no restart needed.
 
 ### Deploy: droplet
 
@@ -75,7 +80,7 @@ npm install                          # builds better-sqlite3's native module her
 npm run build
 sudo useradd -r -s /usr/sbin/nologin ptabot
 sudo mkdir -p /var/lib/pta-bot && sudo chown ptabot:ptabot /var/lib/pta-bot
-sudo cp .env /etc/pta-bot.env        # DB_PATH=/var/lib/pta-bot/pta.db
+sudo cp .env /etc/pta-bot.env        # DB_DIR=/var/lib/pta-bot/data
 sudo cp systemd/pta-bot-pi.service /etc/systemd/system/
 sudo chown -R ptabot:ptabot /opt/pta-bot
 sudo systemctl enable --now pta-bot-pi
@@ -93,8 +98,10 @@ Two things that matter more at home than on a managed droplet:
 
 ## Before you turn it on
 
-Post this in the group and wait for replies. **Nothing from a parent who has not
-replied `#acepto` is stored at all** (`CONSENT_MODE=optin`).
+When the admin sends `/activar <label> <curso>` in a group (see
+[Multiple groups](#multiple-groups)), the bot posts this message in that group
+automatically and waits for replies — no manual copy-paste needed. **Nothing from a
+parent who has not replied `#acepto` is stored at all** (`CONSENT_MODE=optin`).
 
 > Hola a todos 👋 Para no perder información importante del salón (fechas, entregas,
 > aportes), voy a usar un asistente automático que me ayuda a organizar lo que se
@@ -109,9 +116,10 @@ replied `#acepto` is stored at all** (`CONSENT_MODE=optin`).
 >
 > Usa la API de Anthropic (Claude) para procesar los textos.
 
-(An earlier version of this bot tried to post this automatically when the admin added
-it to a group — reverted, see `CLAUDE.md`'s known-open-items on `group-participants.update`
-for why.)
+(An earlier version of this bot tried to auto-post this on the raw `group-participants.update`
+event fired when the admin added it to a group — reverted as broken on `@lid`-addressed
+groups; see `CLAUDE.md`'s known-open-items. `/activar` succeeds where that didn't because
+it rides the already-working message-received path instead of that broken event.)
 
 Responding `#salir` sets `consent_state='withdrawn'` and immediately deletes that
 participant's raw messages. Switch to `CONSENT_MODE=optout` only if you decide the
@@ -137,12 +145,12 @@ coverage loss outweighs the exposure — the gate is one branch in `ingest/pipel
 | reply `ok` to a draft | publish as-is |
 | reply `no` | discard |
 | reply with text | publish your text instead |
-| `/pendientes` | facts below the auto-confirm threshold |
-| `/cumple Sofía 14/03` | add a birthday |
-| `/cumples` | list every stored birthday, calendar order |
-| `/proximos` | reminders and birthdays coming up in the next 30 days |
-| `/correo <texto>` | extract reminders from a pasted email |
-| send a photo | extract reminders from a newsletter screenshot — no caption needed |
+| `/pendientes <label>` | facts below the auto-confirm threshold |
+| `/cumple <label> Sofía 14/03` | add a birthday |
+| `/cumples <label>` | list every stored birthday, calendar order |
+| `/proximos <label>` | reminders and birthdays coming up in the next 30 days |
+| `/correo <label> <texto>` | extract reminders from a pasted email |
+| send a photo, label as the caption | extract reminders from a newsletter screenshot |
 
 Both `/correo` and the photo path extract into the same `facts` table the nightly chat
 extraction uses (so `/pendientes`, `@bot`, and the digest all see them too), and draft
@@ -151,15 +159,35 @@ everything else. See `CLAUDE.md` invariant 4 for the health-content caveat on th
 path: the image is sent to Anthropic's API regardless of what it contains, since there's
 no way to check it locally before the model reads it.
 
-Set `COURSE_NAME` (e.g. `2nd A`) if the newsletters you share cover multiple grades —
-items about a different course get dropped before storage, never drafted. Leave it
-unset and nothing is filtered.
+## Multiple groups
+
+One bot process, one WhatsApp connection, one admin — but any number of registered
+groups, each with fully isolated data (own participants, consent state, facts,
+birthdays, drafts). Add the bot to a new WhatsApp group, then have its admin send
+`/activar <label> <curso>` (e.g. `/activar 2ndA 2nd A`) as a plain message in that
+group. `label` is a short, whitespace-free token you choose — it's what every admin
+command above takes as its first argument to say which group's data to act on.
+`curso` is everything after the label, verbatim (e.g. `2nd A`), used to filter the
+`/correo` and photo-newsletter extraction to that class; a group can be registered
+with no `curso` if it only ever receives newsletters for that one class.
+
+Registration takes effect immediately, no restart: on success the bot replies in
+that group with the consent/welcome message. Sending `/activar` again in an
+already-registered group, or with a `label` another group already has, gets a
+clear error reply instead of silently re-registering or renaming anything.
+
+Every parent's consent is scoped to the group they're in — accepting in one group
+never opts them into another. See `docs/superpowers/specs/2026-08-23-multi-group-support-design.md`
+for the full design and why groups get separate SQLite files rather than a shared
+one with a `group_id` column.
 
 ## What is deliberately missing
 
-- **No embeddings/vector store.** ~90 daily records plus ~200 facts fit in context.
-  Revisit only if the group grows 10×.
-- **No ORM.** Nine tables, one writer.
+- **No embeddings/vector store.** ~90 daily records plus ~200 facts fit in context —
+  per group; each group's nightly extraction only ever looks at its own data. Revisit
+  only if a single group's own traffic grows 10×.
+- **No ORM.** Nine tables per group, plus three shared ones (auth_state,
+  heartbeat, groups) in one bot-level db.
 - **No Litestream.** Nightly encrypted snapshots instead — worse RPO, but composes
   with encryption at rest, which matters more for children's data.
 - **No autonomous posting.** Every outbound message passes through your DM.
