@@ -291,17 +291,25 @@ function addBirthday(db: Database, name: string, date: string): string {
     return 'Uso: /cumple <label> <nombre> <dd/mm>';
   }
   const [d, mo] = date.split('/').map(Number);
+  // Deliberately no year stored.
   db.prepare('INSERT INTO birthdays (child_name, day, month, created_at) VALUES (?,?,?,?)')
     .run(name, d, mo, Date.now());
   return `Listo: ${name} — ${d}/${mo}`;
 }
 
+/** Calendar order (month, then day), not insertion order — this is meant to read as a
+ *  usable year-round list, not a log of when each birthday was added. Bare d/mo, not
+ *  formatSpanish: these aren't tied to any specific year, so a weekday would be
+ *  meaningless (and formatSpanish always includes one). */
 function listAllBirthdays(db: Database): string {
   const rows = db.prepare('SELECT child_name, day, month FROM birthdays ORDER BY month, day').all() as any[];
   if (!rows.length) return 'No hay cumpleaños guardados.';
   return rows.map(r => `🎂 ${r.child_name} — ${r.day}/${r.month}`).join('\n');
 }
 
+/** On-demand version of the daily/weekly digest's own upcoming()/birthdaysWithin() —
+ *  same confirmed-facts-only data, just a wider window and available whenever asked
+ *  instead of waiting for the scheduled time. */
 function listUpcoming(db: Database): string {
   const items = upcoming(db, 0, 30);
   const bdays = birthdaysWithin(db, 30);
