@@ -9,6 +9,13 @@ AGE_RECIPIENT="${AGE_RECIPIENT:?set AGE_RECIPIENT to your age public key}"
 REMOTE="${RCLONE_REMOTE:-r2:pta-bot-backups}"
 DATE_TAG="$(date +%F)"
 
+# If age or rclone fails partway through the per-file loop below, `set -e` aborts the
+# script without cleaning up that file's plaintext VACUUM INTO staging copy -- this is
+# unencrypted data (message bodies, children's names) that would otherwise linger in
+# /tmp indefinitely (the filename is date-tagged, so a later successful run doesn't
+# overwrite or clean it up). Glob matches snapshot_one()'s $stage pattern below.
+trap 'rm -f /tmp/pta-*-${DATE_TAG}.db /tmp/pta-*-${DATE_TAG}.db.age' EXIT
+
 snapshot_one() {
   local db_file="$1"
   local name
