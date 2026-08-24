@@ -1,5 +1,6 @@
 import type { WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
+import type { Database } from 'better-sqlite3';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { ingest, resolveParticipant } from '../ingest/pipeline.js';
@@ -9,6 +10,20 @@ import { extractFromEmailText, extractFromEmailImage } from '../extract/email.js
 import { upcoming, birthdaysWithin } from '../scheduler/index.js';
 import { formatSpanish } from '../util/dates.js';
 import { db } from '../db/index.js';
+import { GroupRegistry, type GroupContext } from '../groups.js';
+
+const WELCOME_MESSAGE = `Hola 👋 Soy el asistente automático del salón.
+
+• Puedes preguntarme algo mencionándome (@) en cualquier mensaje — respondo con la
+  información que tengo registrada.
+• Solo proceso mensajes de quienes respondan *#acepto* a este mensaje.
+• Los mensajes se borran a los 7 días; solo se guardan fechas y acuerdos importantes.
+• No guardo información de salud de ningún niño.
+• Los cumpleaños se guardan solo con nombre y día/mes, sin año.
+• Nada se publica aquí sin que el administrador lo revise primero.
+• Puedes salir cuando quieras escribiendo *#salir* (borra tus mensajes).
+
+Uso la API de Anthropic (Claude) para procesar los textos.`;
 
 function textOf(m: WAMessage): string {
   const msg = m.message;
@@ -29,7 +44,16 @@ function isMyJid(sock: WASocket, jid: string): boolean {
   return (!!meId && jid.startsWith(meId)) || (!!meLid && jid.startsWith(meLid));
 }
 
-export function attachRouter(sock: WASocket): void {
+/** Parses "/activar <label> <curso...>". label is the first whitespace-separated
+ *  token; curso is everything after it, verbatim -- no quoting syntax needed, same
+ *  convention as /correo consuming everything after the command token as one blob. */
+function parseActivar(text: string): { label: string; courseName: string } | null {
+  const match = text.trim().match(/^\/activar\s+(\S+)\s+(.+)$/is);
+  if (!match) return null;
+  return { label: match[1], courseName: match[2].trim() };
+}
+
+export function attachRouter(sock: WASocket, botDb: Database, registry: GroupRegistry): void {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     // 'append' is history replay on reconnect. Ingesting it re-extracts weeks of
     // messages and re-fires old reminders. Together with INSERT OR IGNORE on the
@@ -38,13 +62,13 @@ export function attachRouter(sock: WASocket): void {
 
     for (const m of messages) {
       // One bad message must never kill the event loop for the rest of the batch.
-      try { await route(sock, m); }
+      try { await route(sock, botDb, registry, m); }
       catch (e) { log.error({ e, id: m.key.id }, 'route failed'); }
     }
   });
 }
 
-async function route(sock: WASocket, m: WAMessage): Promise<void> {
+async function route(sock: WASocket, botDb: Database, registry: GroupRegistry, m: WAMessage): Promise<void> {
   const chat = m.key.remoteJid;
   if (!chat) return;
 
@@ -52,12 +76,12 @@ async function route(sock: WASocket, m: WAMessage): Promise<void> {
     if (m.key.fromMe) return; // our own outgoing messages, reflected back
 
     const quoted = m.message?.extendedTextMessage?.contextInfo?.stanzaId;
-    if (quoted && await resolveReply(quoted, textOf(m))) return;
+    if (quoted && await resolveReply(registry.all(), quoted, textOf(m))) return;
 
     // Any photo you DM the bot is treated as a newsletter/email screenshot to mine
     // for reminders — no caption required.
     if (m.message?.imageMessage) {
-      await handleEmailImage(sock, m);
+      await handleEmailImage(sock, registry, m);
       return;
     }
 
@@ -65,40 +89,35 @@ async function route(sock: WASocket, m: WAMessage): Promise<void> {
     if (/^\/correo\b/i.test(text.trim())) {
       // Only strip the command token — the rest, including line breaks, is the
       // pasted email body and must survive intact for extraction.
-      await handleEmailText(sock, text.trim().replace(/^\/correo\s*/i, ''));
+      await handleEmailText(sock, registry, text.trim().replace(/^\/correo\s*/i, ''));
       return;
     }
 
-    await handleAdminCommand(sock, text);
+    await handleAdminCommand(sock, registry, text);
     return;
   }
 
-  if (chat !== config.groupJid) {
-    // Bootstrap aid: GROUP_JID starts empty (see config.ts) and there is otherwise no
-    // way to discover it. Only logs while unconfigured — once GROUP_JID is set, any
-    // other chat goes back to being silently ignored, same as everything else outside
-    // the admin/group scope.
-    if (!config.groupJid && chat.endsWith('@g.us') && !m.key.fromMe) {
-      log.info({ chat }, 'message from an unconfigured group — set GROUP_JID to this to start ingesting it');
-    } else if (!chat.endsWith('@g.us') && !m.key.fromMe) {
-      // A DM from someone other than ADMIN_JID gets no reply and, until now, no log
-      // either — a misconfigured ADMIN_JID (wrong format, wrong number) fails totally
-      // silently otherwise. Debug level: real stray DMs should be rare, and this isn't
-      // a bootstrap-only concern the way the group case above is.
-      log.debug({ chat }, 'DM from a non-admin JID, ignored');
-    }
+  if (!chat.endsWith('@g.us')) {
+    // A DM from someone other than ADMIN_JID — no reply, debug-level log only.
+    if (!m.key.fromMe) log.debug({ chat }, 'DM from a non-admin JID, ignored');
+    return;
+  }
+
+  const group = registry.findByJid(chat);
+  if (!group) {
+    await handleUnregisteredGroup(sock, botDb, registry, m, chat);
     return;
   }
 
   // Hot path: local only, no network, sub-millisecond.
-  ingest(m);
+  ingest(group.db, m);
 
   // The one synchronous LLM call. Mentions only — a bot that answers ambient
   // chatter is the fastest way to get itself muted by 25 people.
   const mentioned = m.message?.extendedTextMessage?.contextInfo?.mentionedJid ?? [];
   if (mentioned.some(j => isMyJid(sock, j))) {
     const sender = m.key.participant ?? chat;
-    const waitMs = tryConsumeCooldown(resolveParticipant(sender));
+    const waitMs = tryConsumeCooldown(group.db, resolveParticipant(group.db, sender));
     if (waitMs > 0) {
       const waitSec = Math.ceil(waitMs / 1000);
       await sock.sendMessage(
@@ -109,9 +128,49 @@ async function route(sock: WASocket, m: WAMessage): Promise<void> {
       return;
     }
     await sock.sendPresenceUpdate('composing', chat);
-    const reply = await answerQuestion(textOf(m));
+    const reply = await answerQuestion(group.db, textOf(m));
     await sock.sendMessage(chat, { text: reply }, { quoted: m });
   }
+}
+
+async function handleUnregisteredGroup(
+  sock: WASocket,
+  botDb: Database,
+  registry: GroupRegistry,
+  m: WAMessage,
+  chat: string,
+): Promise<void> {
+  const text = textOf(m);
+  const parsed = parseActivar(text);
+
+  if (!parsed) {
+    // Ordinary chat message in a not-yet-registered group -- bootstrap-aid log only,
+    // same as before this feature existed. Doesn't register anything.
+    if (!m.key.fromMe) log.info({ chat }, 'message from an unregistered group — send /activar <label> <curso> as the admin to register it');
+    return;
+  }
+
+  const sender = m.key.participant;
+  if (!sender || sender !== config.adminJid) {
+    log.debug({ chat, sender }, '/activar attempted by non-admin (or unresolved sender), ignored');
+    return;
+  }
+
+  const existingByLabel = registry.findByLabel(parsed.label);
+  if (existingByLabel) {
+    await sock.sendMessage(chat, { text: `⚠️ "${parsed.label}" ya está en uso por otro grupo.` });
+    return;
+  }
+
+  try {
+    registry.register(chat, parsed.label, parsed.courseName);
+  } catch (e) {
+    log.error({ e, chat, label: parsed.label }, 'group registration failed');
+    await sock.sendMessage(chat, { text: 'No pude registrar este grupo. Intenta de nuevo.' });
+    return;
+  }
+
+  await sock.sendMessage(chat, { text: WELCOME_MESSAGE });
 }
 
 async function handleAdminCommand(sock: WASocket, text: string): Promise<void> {
