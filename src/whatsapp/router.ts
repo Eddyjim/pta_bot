@@ -161,8 +161,20 @@ async function route(sock: WASocket, botDb: Database, registry: GroupRegistry, m
         await sock.sendMessage(chat, { text: LABEL_USAGE_ERROR });
         return;
       }
+      if (parsedActivar.label !== group.label) {
+        // A typo, or a /activar meant for a different group sent to the wrong chat,
+        // must never silently rewrite THIS group's course_name — the reply always
+        // names this group's real label, so a mismatch is surfaced, not applied.
+        await sock.sendMessage(chat, {
+          text: `⚠️ Este grupo ya está activado como "${group.label}", no como "${parsedActivar.label}". ` +
+                `Para actualizar el curso: /activar ${group.label} <curso>`,
+        });
+        return;
+      }
       registry.updateCourseName(group.jid, parsedActivar.courseName);
-      await sock.sendMessage(chat, { text: `⚠️ Este grupo ya está activado como "${group.label}".` });
+      await sock.sendMessage(chat, {
+        text: `⚠️ Este grupo ya está activado como "${group.label}". Curso actualizado a "${parsedActivar.courseName}".`,
+      });
       return;
     }
     log.warn({ chat, sender, adminJid: config.adminJid }, '/activar attempted by non-admin (or unresolved sender), ignored');

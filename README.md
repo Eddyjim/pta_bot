@@ -180,11 +180,15 @@ Registration takes effect immediately, no restart: on success the bot replies in
 that group with the consent/welcome message. Sending `/activar` with a `label`
 another group already has gets a clear error reply instead of silently renaming
 anything. Sending `/activar` again in an already-registered group does not
-re-register it or reset its data — it replies `ya está activado como "<label>"`
-and updates that group's `curso` to whatever you just sent, which is also how you
-set `curso` on a group that was created without one, including one moved over by
-the [upgrade migration script](#upgrading-an-existing-single-group-deployment)
-(the old single-group schema never stored a course name at all).
+re-register it or reset its data — as long as the `label` you send matches that
+group's own, it replies `ya está activado como "<label>". Curso actualizado a
+"<curso>"` and updates the `curso`, which is also how you set `curso` on a group
+that was created without one, including one moved over by the
+[upgrade migration script](#upgrading-an-existing-single-group-deployment) (the
+old single-group schema never stored a course name at all). Sending a *different*
+label than the group's own — a typo, or an `/activar` meant for another group sent
+to the wrong chat — is rejected with the real label named, rather than silently
+overwriting this group's `curso` with whatever was typed.
 
 Every parent's consent is scoped to the group they're in — accepting in one group
 never opts them into another. See `docs/superpowers/specs/2026-08-23-multi-group-support-design.md`
