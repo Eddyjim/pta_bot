@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { db } from '../db/index.js';
+import type { Database } from 'better-sqlite3';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { bogotaDay } from '../util/dates.js';
@@ -14,7 +14,7 @@ const client = new Anthropic({ apiKey: config.anthropicKey });
  * Returns 0 and records the attempt if allowed; otherwise returns the ms remaining
  * and does NOT call the LLM.
  */
-export function tryConsumeCooldown(participantId: number): number {
+export function tryConsumeCooldown(db: Database, participantId: number): number {
   const cooldownMs = config.answerCooldownSeconds * 1000;
   return db.transaction(() => {
     const row = db
@@ -36,7 +36,7 @@ export function tryConsumeCooldown(participantId: number): number {
  * ~90 compact daily records fit trivially in context. No embeddings, no vector store,
  * no chunk-retrieval failure modes. Revisit only if the group grows an order of magnitude.
  */
-export async function answerQuestion(question: string): Promise<string> {
+export async function answerQuestion(db: Database, question: string): Promise<string> {
   const facts = db.prepare(
     `SELECT kind, payload, effective_date, created_at FROM facts
       WHERE status IN ('confirmed','unconfirmed') AND superseded_by IS NULL
