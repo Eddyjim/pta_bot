@@ -93,14 +93,8 @@ Two things that matter more at home than on a managed droplet:
 
 ## Before you turn it on
 
-**If you add the bot to the group yourself**, it posts the consent explanation
-automatically — `whatsapp/router.ts` listens for `group-participants.update` and sends
-it the moment it detects it was added by `ADMIN_JID` specifically (added by anyone
-else, it stays silent — no message, no bootstrap logging — so a stray add to an
-unrelated group doesn't put it into "installation mode" there).
-
-If you'd rather post it yourself (e.g. the bot was already in the group before this
-existed), here's the same text:
+Post this in the group and wait for replies. **Nothing from a parent who has not
+replied `#acepto` is stored at all** (`CONSENT_MODE=optin`).
 
 > Hola a todos 👋 Para no perder información importante del salón (fechas, entregas,
 > aportes), voy a usar un asistente automático que me ayuda a organizar lo que se
@@ -115,11 +109,13 @@ existed), here's the same text:
 >
 > Usa la API de Anthropic (Claude) para procesar los textos.
 
-Either way, **nothing from a parent who has not replied `#acepto` is stored at all**
-(`CONSENT_MODE=optin`). Responding `#salir` sets `consent_state='withdrawn'` and
-immediately deletes that participant's raw messages. Switch to `CONSENT_MODE=optout`
-only if you decide the coverage loss outweighs the exposure — the gate is one branch
-in `ingest/pipeline.ts`.
+(An earlier version of this bot tried to post this automatically when the admin added
+it to a group — reverted, see `CLAUDE.md`'s known-open-items on `group-participants.update`
+for why.)
+
+Responding `#salir` sets `consent_state='withdrawn'` and immediately deletes that
+participant's raw messages. Switch to `CONSENT_MODE=optout` only if you decide the
+coverage loss outweighs the exposure — the gate is one branch in `ingest/pipeline.ts`.
 
 ## Operational notes
 
