@@ -82,4 +82,19 @@ export class GroupRegistry {
     log.info({ jid, label, courseName }, 'group registered');
     return ctx;
   }
+
+  /** Re-running /activar in an already-registered group updates its course_name
+   *  instead of silently no-op'ing -- this is also the only way to ever set
+   *  course_name on a group left NULL by the production migration script (the old
+   *  single-group schema never stored a course name anywhere queryable). Updates
+   *  both the in-memory GroupContext and the groups table row; throws if jid isn't
+   *  registered (caller is expected to have already resolved the GroupContext via
+   *  findByJid before calling this). */
+  updateCourseName(jid: string, courseName: string): void {
+    const ctx = this.byJid.get(jid);
+    if (!ctx) throw new Error(`jid not registered: ${jid}`);
+    this.botDb.prepare('UPDATE groups SET course_name = ? WHERE jid = ?').run(courseName, jid);
+    ctx.courseName = courseName;
+    log.info({ jid, label: ctx.label, courseName }, 'group course_name updated');
+  }
 }

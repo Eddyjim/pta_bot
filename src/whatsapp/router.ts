@@ -52,6 +52,45 @@ function parseActivar(text: string): { label: string; courseName: string } | nul
   return { label: match[1], courseName: match[2].trim() };
 }
 
+// group-${label}.db is built directly from this string (see GroupRegistry.register /
+// openGroupDb) -- an unvalidated label containing path separators (e.g. "../../bot")
+// resolves outside the intended data directory and can overwrite bot.db itself.
+// Reproduced live in review: registry.register('111@g.us', '../../bot', '2nd A')
+// corrupted bot.db. Keep this restrictive: filesystem-safe, human-typeable, no path
+// metacharacters at all.
+const LABEL_RE = /^[A-Za-z0-9_-]{1,32}$/;
+const LABEL_USAGE_ERROR =
+  '⚠️ Label inválido: usa solo letras, números, guion (-) y guion bajo (_), 1-32 caracteres.';
+
+function isValidLabel(label: string): boolean {
+  return LABEL_RE.test(label);
+}
+
+/**
+ * Mirrors isMyJid's dual-form-tolerant pattern (see comment above it): this project
+ * has twice hit total, silent failure from comparing a JID in only one form
+ * (phone-number vs @lid vs a ":device" suffix). config.adminJid is a single
+ * configured string, not derived live from sock.user like isMyJid's targets, so the
+ * best available normalization here is stripping the ":<device>" suffix Baileys
+ * sometimes appends before comparing -- it can't fix a wholesale phone-number-vs-@lid
+ * mismatch (that needs the operator to reconfigure ADMIN_JID, same as documented in
+ * CLAUDE.md's known-open-items for the 1:1 DM case), but it at least tolerates the
+ * device-suffix variation, and callers log both raw values at `warn` so a real-world
+ * mismatch is immediately diagnosable via journalctl without enabling debug logging.
+ */
+function isAdminSender(sender: string | null | undefined): boolean {
+  if (!sender) return false;
+  // A JID with a device suffix looks like "<number>:<device>@<domain>" -- the colon
+  // sits BEFORE the @, so a plain .split(':')[0] on a suffixed JID strips the whole
+  // "@domain" tail along with the device id, while the same call on an unsuffixed
+  // JID (config.adminJid normally has no suffix) leaves "@domain" in place. Compared
+  // directly, that asymmetry makes "5551234:2@s.whatsapp.net" and "5551234@s.whatsapp.net"
+  // look unequal even though they're the same admin. Stripping both the device suffix
+  // AND the domain from each side first (bareNumber) avoids that false negative.
+  const bareNumber = (jid: string) => jid.split(':')[0].split('@')[0];
+  return bareNumber(sender) === bareNumber(config.adminJid);
+}
+
 export function attachRouter(sock: WASocket, botDb: Database, registry: GroupRegistry): void {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     // 'append' is history replay on reconnect. Ingesting it re-extracts weeks of
@@ -108,6 +147,27 @@ async function route(sock: WASocket, botDb: Database, registry: GroupRegistry, m
     return;
   }
 
+  // /activar in an ALREADY-registered group: previously fell straight through to
+  // ingest() below and was stored as ordinary chat text, with zero reply -- silent
+  // no-op from the admin's point of view. Also the only way to ever set course_name
+  // on a group left NULL by the production migration script (the old single-group
+  // schema never stored it). Check before the hot-path ingest, not after.
+  const activarText = textOf(m);
+  const parsedActivar = parseActivar(activarText);
+  if (parsedActivar) {
+    const sender = m.key.participant;
+    if (isAdminSender(sender)) {
+      if (!isValidLabel(parsedActivar.label)) {
+        await sock.sendMessage(chat, { text: LABEL_USAGE_ERROR });
+        return;
+      }
+      registry.updateCourseName(group.jid, parsedActivar.courseName);
+      await sock.sendMessage(chat, { text: `⚠️ Este grupo ya está activado como "${group.label}".` });
+      return;
+    }
+    log.warn({ chat, sender, adminJid: config.adminJid }, '/activar attempted by non-admin (or unresolved sender), ignored');
+  }
+
   // Hot path: local only, no network, sub-millisecond.
   ingest(group.db, m);
 
@@ -150,8 +210,13 @@ async function handleUnregisteredGroup(
   }
 
   const sender = m.key.participant;
-  if (!sender || sender !== config.adminJid) {
-    log.debug({ chat, sender }, '/activar attempted by non-admin (or unresolved sender), ignored');
+  if (!isAdminSender(sender)) {
+    log.warn({ chat, sender, adminJid: config.adminJid }, '/activar attempted by non-admin (or unresolved sender), ignored');
+    return;
+  }
+
+  if (!isValidLabel(parsed.label)) {
+    await sock.sendMessage(chat, { text: LABEL_USAGE_ERROR });
     return;
   }
 
@@ -241,8 +306,13 @@ function summarizeEmailResult(result: EmailResult): string {
 }
 
 async function handleEmailText(sock: WASocket, registry: GroupRegistry, text: string): Promise<void> {
-  const [label, ...rest] = text.trim().split(/\s+/);
-  const body = rest.join(' ');
+  // Split on the FIRST whitespace run only -- everything after it, including line
+  // breaks, blank lines, and multi-space indentation, is the pasted email body and
+  // must survive intact for extraction (newsletters carry meaning in their line
+  // structure: dates on their own lines, bullet lists).
+  const match = text.replace(/^\s+/, '').match(/^(\S+)\s+([\s\S]*)$/);
+  const label = match?.[1];
+  const body = match?.[2] ?? '';
   const group = label ? registry.findByLabel(label) : undefined;
 
   if (!group || !body.trim()) {
