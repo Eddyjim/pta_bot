@@ -120,6 +120,11 @@ Reglas:
 - NUNCA registres información de salud de ningún niño, aunque aparezca en el texto o la imagen.
 - Las tareas y trabajos escolares (qué hay que entregar y para cuándo) son "deadlines"
   con who_must_act: "students".
+- El versículo bíblico de la semana y las palabras de ortografía (spelling) de la
+  semana, si aparecen en el boletín, son "deadlines" con who_must_act: "students" --
+  regístralos aunque parezcan rutinarios, no son contenido puramente informativo.
+  Ambos se evalúan el viernes de esa semana; si el boletín no da una fecha explícita,
+  usa el viernes de la semana de la fecha de referencia como due_date.
 - Es correcto devolver listas vacías. Prefiere no registrar nada antes que registrar algo dudoso.${courseNote}`;
 }
 
