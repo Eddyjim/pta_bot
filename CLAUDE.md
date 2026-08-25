@@ -43,6 +43,14 @@ touching group registration, dispatch, or the per-group/bot-level db split.
    model-generated or free-text at post time). `weekAhead`, `/correo`, `/anuncio`,
    and every other outbound path are unaffected and still require approval. Do not
    extend this exception to another job without the same explicit discussion.
+   **A second exception, same reasoning, discussed and approved separately
+   (2026-08-25):** `scheduler/index.ts`'s `eventReminder` (a poll every 5 minutes,
+   firing ~15 minutes before a confirmed event's stored time, e.g. a meeting link)
+   also posts directly. Same justification as `dailyDigest` — built entirely from
+   an already-confirmed fact, and a reminder that sits in the DM queue until
+   noticed defeats the point of "arrives near the meeting time." Tracked via
+   `facts.reminded_at` so a poll never re-sends. Still just these two jobs; every
+   other outbound path remains gated.
 
 2. **Never key anything on a JID.** WhatsApp is migrating group participant identifiers
    from phone-number JIDs to `@lid`. `participant_jids` maps JIDs → `participants.id`;

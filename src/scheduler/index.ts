@@ -5,7 +5,7 @@ import { log } from '../logger.js';
 import { runExtraction } from '../extract/job.js';
 import { draft, expireStale } from '../outbox/index.js';
 import { getSock } from '../whatsapp/connection.js';
-import { bogotaDay, formatSpanish, isHoliday } from '../util/dates.js';
+import { bogotaDay, bogotaMinutesNow, formatSpanish, isHoliday } from '../util/dates.js';
 import type { GroupRegistry, GroupContext } from '../groups.js';
 
 const opts = { timezone: config.tz } as const;
@@ -18,6 +18,7 @@ export function startScheduler(registry: GroupRegistry): void {
   cron.schedule(`0 ${config.digestHour} * * *`, () => guard('digest', () => runForEachGroup(registry, dailyDigest)), opts);
   cron.schedule('0 19 * * 0', () => guard('weekly', () => runForEachGroup(registry, weekAhead)), opts);
   cron.schedule('*/15 * * * *', () => guard('expire', () => expireStale(registry.all())), opts);
+  cron.schedule('*/5 * * * *', () => guard('event-reminder', () => runForEachGroup(registry, eventReminder)), opts);
 
   // If the process was down at 02:00, catch up on boot rather than silently skipping.
   const yesterday = bogotaDay(-1);
@@ -101,6 +102,60 @@ async function dailyDigest(group: GroupContext): Promise<void> {
   if (bdays.length) lines.push('', ...bdays);
 
   await getSock().sendMessage(group.jid, { text: lines.join('\n') });
+}
+
+/** Parses a strict 24-hour "HH:MM" (per the tightened extraction schema) into
+ *  minutes since midnight. Anything else -- free text an older extraction left
+ *  behind, a malformed value -- returns null and is skipped, never guessed at. */
+function parseTimeToMinutes(time: string): number | null {
+  const m = time.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hour = Number(m[1]), minute = Number(m[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+/**
+ * Second deliberate exception to CLAUDE.md invariant 1, alongside dailyDigest
+ * above -- posts directly, no draft/approval. Same reasoning: built entirely from
+ * an already-confirmed fact, and a reminder that sits in the DM approval queue
+ * until noticed defeats the entire point of "arrives near the meeting time."
+ *
+ * Polls every 5 minutes rather than scheduling a one-off timer per event: timers
+ * are in-memory and don't survive a restart, whereas re-querying confirmed facts
+ * on each poll is naturally restart-safe -- same reasoning as the boot-time
+ * extraction catchup in startScheduler.
+ */
+async function eventReminder(group: GroupContext): Promise<void> {
+  const today = bogotaDay();
+  const nowMin = bogotaMinutesNow();
+  const events = group.db.prepare(
+    `SELECT id, payload FROM facts
+      WHERE kind = 'event' AND status = 'confirmed' AND superseded_by IS NULL
+        AND effective_date = ? AND reminded_at IS NULL`,
+  ).all(today) as Array<{ id: number; payload: string }>;
+
+  for (const row of events) {
+    const p = JSON.parse(row.payload);
+    if (!p.time) continue;
+    const eventMin = parseTimeToMinutes(p.time);
+    if (eventMin === null) continue;
+
+    // Fire once within 15 minutes of the event, but never more than 2 hours past
+    // it -- a process outage/restart shouldn't surface a wildly stale reminder.
+    const minutesUntil = eventMin - nowMin;
+    if (minutesUntil > 15 || minutesUntil < -120) continue;
+
+    const title = p.title ?? p.what ?? p.purpose;
+    const timing = minutesUntil > 0
+      ? `empieza en ${minutesUntil} minuto${minutesUntil === 1 ? '' : 's'}`
+      : 'ya comenzó';
+    const text = `🔔 *${title}* ${timing} (${p.time})` + (p.location ? ` — ${p.location}` : '');
+
+    await getSock().sendMessage(group.jid, { text });
+    group.db.prepare('UPDATE facts SET reminded_at = ? WHERE id = ?').run(Date.now(), row.id);
+    log.info({ label: group.label, factId: row.id, minutesUntil }, 'event reminder sent');
+  }
 }
 
 async function weekAhead(group: GroupContext): Promise<void> {

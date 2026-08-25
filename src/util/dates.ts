@@ -8,6 +8,18 @@ export function bogotaDay(offsetDays = 0): string {
   }).format(d);
 }
 
+/** Minutes since midnight, right now, in Bogota -- for comparing against a stored
+ *  HH:MM event time without constructing cross-timezone Date objects. */
+export function bogotaMinutesNow(): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date());
+  let hour = Number(parts.find(p => p.type === 'hour')?.value ?? 0);
+  const minute = Number(parts.find(p => p.type === 'minute')?.value ?? 0);
+  if (hour === 24) hour = 0; // some Intl implementations report midnight as "24", not "00"
+  return hour * 60 + minute;
+}
+
 export function formatSpanish(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
   return new Intl.DateTimeFormat('es-CO', {

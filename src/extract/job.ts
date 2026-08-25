@@ -27,7 +27,13 @@ const EXTRACT_TOOL: Anthropic.Tool = {
           properties: {
             title: { type: 'string' },
             date: { type: 'string', description: 'ISO YYYY-MM-DD. Resolve relative dates against the provided reference date.' },
-            time: { type: 'string' },
+            time: {
+              type: 'string',
+              description:
+                '24-hour HH:MM, e.g. "16:00" for 4pm. Convert whatever format the source ' +
+                'uses (e.g. "4pm", "4:00 PM", "4 de la tarde") into this exact format. ' +
+                'Omit entirely if no time was stated -- never guess one.',
+            },
             location: { type: 'string' },
             confidence: { type: 'number', description: '0-1. Below 0.6 if the date was implied rather than stated.' },
             source_excerpt: { type: 'string', description: 'Verbatim, max 200 chars.' },
