@@ -1,9 +1,10 @@
 # pta-bot
 
 WhatsApp assistant for class parent groups. Ingests group chat, extracts actionable
-facts nightly, and drafts reminders that **you approve before anything is posted**.
-One bot process and one admin cover any number of registered groups — see
-[Multiple groups](#multiple-groups).
+facts nightly, and drafts reminders that **you approve before anything is posted** —
+except the daily digest below, which posts automatically (a deliberate, narrow
+exception; see `CLAUDE.md` invariant 1). One bot process and one admin cover any
+number of registered groups — see [Multiple groups](#multiple-groups).
 
 Node 20+ · Baileys · SQLite · Claude Haiku · ~$8/mo on a $6 DigitalOcean droplet, or
 free on a Raspberry Pi at home.
@@ -19,8 +20,8 @@ free on a Raspberry Pi at home.
      02:00 stage-2 extraction (LLM) → facts
      02:30 purge + incremental_vacuum
      03:00 encrypted snapshot → R2
-     08:00 digest draft → your DM (DIGEST_HOUR)
-     Sun 19:00 week-ahead draft
+     08:00 daily digest → posted directly, no approval (DIGEST_HOUR)
+     Sun 19:00 week-ahead draft → your DM
 ```
 
 One process, one restart unit, one SQLite file per registered group plus one

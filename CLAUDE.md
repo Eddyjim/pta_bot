@@ -34,6 +34,15 @@ touching group registration, dispatch, or the per-group/bot-level db split.
    approval. There is no autonomous-posting path and adding one is not an optimization.
    Multi-group didn't change this invariant — it's still one approval gate, just
    fed by N groups' outboxes instead of one.
+   **One deliberate, narrow exception (2026-08-25):** `scheduler/index.ts`'s
+   `dailyDigest` (the recurring same-day/day-before "Recordatorio del salón" job)
+   posts directly via `getSock().sendMessage()`, bypassing `draft()`/approval
+   entirely — the operator's explicit choice, made live during the production
+   launch, to cut approval friction for the one message that's both frequent and
+   built entirely from data already confirmed in `facts`/`birthdays` (nothing
+   model-generated or free-text at post time). `weekAhead`, `/correo`, `/anuncio`,
+   and every other outbound path are unaffected and still require approval. Do not
+   extend this exception to another job without the same explicit discussion.
 
 2. **Never key anything on a JID.** WhatsApp is migrating group participant identifiers
    from phone-number JIDs to `@lid`. `participant_jids` maps JIDs → `participants.id`;

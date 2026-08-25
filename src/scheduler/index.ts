@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { log } from '../logger.js';
 import { runExtraction } from '../extract/job.js';
 import { draft, expireStale } from '../outbox/index.js';
+import { getSock } from '../whatsapp/connection.js';
 import { bogotaDay, formatSpanish, isHoliday } from '../util/dates.js';
 import type { GroupRegistry, GroupContext } from '../groups.js';
 
@@ -73,6 +74,14 @@ async function purge(group: GroupContext): Promise<void> {
   if (n) log.info({ n, label: group.label }, 'raw messages purged');
 }
 
+/**
+ * Deliberate exception to CLAUDE.md invariant 1 ("nothing posts without human
+ * approval") -- posts directly, no draft/DM/approval step. Scope is intentionally
+ * narrow: only this recurring same-day/day-before digest, built entirely from
+ * data already confirmed in `facts`/`birthdays` (nothing model-generated at post
+ * time, nothing free-text an admin typed). weekAhead below, /correo, /anuncio,
+ * and everything else still go through draft()/approval unchanged.
+ */
 async function dailyDigest(group: GroupContext): Promise<void> {
   const items = upcoming(group.db, 0, 2);
   const bdays = birthdaysWithin(group.db, 3);
@@ -91,7 +100,7 @@ async function dailyDigest(group: GroupContext): Promise<void> {
   }
   if (bdays.length) lines.push('', ...bdays);
 
-  await draft(group.db, group.jid, 'digest', lines.join('\n'));
+  await getSock().sendMessage(group.jid, { text: lines.join('\n') });
 }
 
 async function weekAhead(group: GroupContext): Promise<void> {
