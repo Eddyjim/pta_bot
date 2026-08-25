@@ -13,8 +13,15 @@ DATE_TAG="$(date +%F)"
 # script without cleaning up that file's plaintext VACUUM INTO staging copy -- this is
 # unencrypted data (message bodies, children's names) that would otherwise linger in
 # /tmp indefinitely (the filename is date-tagged, so a later successful run doesn't
-# overwrite or clean it up). Glob matches snapshot_one()'s $stage pattern below.
-trap 'rm -f /tmp/pta-*-${DATE_TAG}.db /tmp/pta-*-${DATE_TAG}.db.age' EXIT
+# overwrite or clean it up). shred, not rm -f, matching snapshot_one()'s own cleanup --
+# a partial-failure staging file is exactly as sensitive as a completed one. Glob
+# matches snapshot_one()'s $stage pattern below; -e guard skips an unmatched literal
+# glob the same way the main loop below does.
+trap '
+  for f in /tmp/pta-*-"${DATE_TAG}".db /tmp/pta-*-"${DATE_TAG}".db.age; do
+    [ -e "$f" ] && shred -u "$f"
+  done
+' EXIT
 
 snapshot_one() {
   local db_file="$1"

@@ -75,20 +75,40 @@ function isValidLabel(label: string): boolean {
  * sometimes appends before comparing -- it can't fix a wholesale phone-number-vs-@lid
  * mismatch (that needs the operator to reconfigure ADMIN_JID, same as documented in
  * CLAUDE.md's known-open-items for the 1:1 DM case), but it at least tolerates the
- * device-suffix variation, and callers log both raw values at `warn` so a real-world
- * mismatch is immediately diagnosable via journalctl without enabling debug logging.
+ * device-suffix variation, and callers log both values (via maskJid, below) at `warn`
+ * so a real-world mismatch is immediately diagnosable via journalctl without enabling
+ * debug logging -- and without a raw phone number ever reaching the log file, which
+ * logger.ts's own redact config only covers for fields literally named `jid`/
+ * `remoteJid`, not `sender`/`adminJid`.
  */
 function isAdminSender(sender: string | null | undefined): boolean {
   if (!sender) return false;
-  // A JID with a device suffix looks like "<number>:<device>@<domain>" -- the colon
-  // sits BEFORE the @, so a plain .split(':')[0] on a suffixed JID strips the whole
-  // "@domain" tail along with the device id, while the same call on an unsuffixed
-  // JID (config.adminJid normally has no suffix) leaves "@domain" in place. Compared
-  // directly, that asymmetry makes "5551234:2@s.whatsapp.net" and "5551234@s.whatsapp.net"
-  // look unequal even though they're the same admin. Stripping both the device suffix
-  // AND the domain from each side first (bareNumber) avoids that false negative.
-  const bareNumber = (jid: string) => jid.split(':')[0].split('@')[0];
-  return bareNumber(sender) === bareNumber(config.adminJid);
+  // A JID with a device suffix looks like "<number>:<device>@<domain>". Strip ONLY
+  // that ":<device>" portion (not the whole tail past the first colon) so a plain
+  // "5551234:2@s.whatsapp.net" and "5551234@s.whatsapp.net" compare equal, without
+  // also dropping the domain -- an earlier version stripped the domain too, which
+  // meant a sender under @lid could numerically match an admin JID under
+  // @s.whatsapp.net purely by digit coincidence. Practically unreachable (@lid ids
+  // are server-assigned, not phone numbers), but conflating JID namespaces is
+  // exactly the failure class CLAUDE.md invariant 2 names, so it's worth closing.
+  const stripDeviceSuffix = (jid: string) => jid.replace(/:\d+(?=@)/, '');
+  return stripDeviceSuffix(sender) === stripDeviceSuffix(config.adminJid);
+}
+
+/**
+ * Masks a JID for logging: keeps the domain (the actual diagnostic signal for the
+ * phone-number-vs-@lid mismatches this project keeps hitting) and the first/last 3
+ * digits of the number, blanking the middle. Enough to eyeball "same number, wrong
+ * domain" or "clearly a different number" without a full phone number ever reaching
+ * the log file -- logger.ts's redact config only strips fields literally named `jid`/
+ * `remoteJid`, so a raw `sender`/`adminJid` value would otherwise slip through it.
+ */
+function maskJid(jid: string | null | undefined): string {
+  if (!jid) return '(none)';
+  const [user, domain] = jid.split('@');
+  const digits = user.replace(/:\d+$/, '');
+  const masked = digits.length > 6 ? `${digits.slice(0, 3)}…${digits.slice(-3)}` : '…';
+  return domain ? `${masked}@${domain}` : masked;
 }
 
 export function attachRouter(sock: WASocket, botDb: Database, registry: GroupRegistry): void {
@@ -177,7 +197,10 @@ async function route(sock: WASocket, botDb: Database, registry: GroupRegistry, m
       });
       return;
     }
-    log.warn({ chat, sender, adminJid: config.adminJid }, '/activar attempted by non-admin (or unresolved sender), ignored');
+    log.warn(
+      { chat, sender: maskJid(sender), adminJid: maskJid(config.adminJid) },
+      '/activar attempted by non-admin (or unresolved sender), ignored',
+    );
   }
 
   // Hot path: local only, no network, sub-millisecond.
@@ -223,7 +246,10 @@ async function handleUnregisteredGroup(
 
   const sender = m.key.participant;
   if (!isAdminSender(sender)) {
-    log.warn({ chat, sender, adminJid: config.adminJid }, '/activar attempted by non-admin (or unresolved sender), ignored');
+    log.warn(
+      { chat, sender: maskJid(sender), adminJid: maskJid(config.adminJid) },
+      '/activar attempted by non-admin (or unresolved sender), ignored',
+    );
     return;
   }
 
