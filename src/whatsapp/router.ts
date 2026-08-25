@@ -13,14 +13,20 @@ import { GroupRegistry, type GroupContext } from '../groups.js';
 
 const WELCOME_MESSAGE = `Hola 👋 Soy el asistente automático del salón.
 
-• Puedes preguntarme algo mencionándome (@) en cualquier mensaje — respondo con la
+*Para participar, responde a este mensaje con #acepto.* Si no lo haces, no guardo
+ni proceso nada de lo que escribas en el grupo.
+
+*Comandos:*
+• *#acepto* — acepta las condiciones y empieza a participar.
+• *#salir* — cancela tu participación cuando quieras (borra tus mensajes guardados).
+• Mencióname (@) en cualquier mensaje para preguntarme algo — respondo con la
   información que tengo registrada.
-• Solo proceso mensajes de quienes respondan *#acepto* a este mensaje.
+
+Cómo funciona:
 • Los mensajes se borran a los 7 días; solo se guardan fechas y acuerdos importantes.
 • No guardo información de salud de ningún niño.
 • Los cumpleaños se guardan solo con nombre y día/mes, sin año.
 • Nada se publica aquí sin que el administrador lo revise primero.
-• Puedes salir cuando quieras escribiendo *#salir* (borra tus mensajes).
 
 Uso la API de Anthropic (Claude) para procesar los textos.`;
 
