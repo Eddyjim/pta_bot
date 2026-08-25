@@ -10,6 +10,7 @@ import { extractFromEmailText, extractFromEmailImage } from '../extract/email.js
 import { upcoming, birthdaysWithin } from '../scheduler/index.js';
 import { formatSpanish } from '../util/dates.js';
 import { GroupRegistry, type GroupContext } from '../groups.js';
+import { parseBirthdayArgs, birthdayExists, insertBirthday } from '../birthdays.js';
 
 const WELCOME_MESSAGE = `Hola 👋 Soy el asistente automático del salón.
 
@@ -21,6 +22,8 @@ ni proceso nada de lo que escribas en el grupo.
 • *#salir* — cancela tu participación cuando quieras (borra tus mensajes guardados).
 • Mencióname (@) en cualquier mensaje para preguntarme algo — respondo con la
   información que tengo registrada.
+• */cumple <nombre> <dd/mm>* — agrega el cumpleaños de un niño (sin año), por
+  ejemplo /cumple Sofía 14/03.
 
 Cómo funciona:
 • Los mensajes se borran a los 7 días; solo se guardan fechas y acuerdos importantes.
@@ -179,8 +182,8 @@ async function route(sock: WASocket, botDb: Database, registry: GroupRegistry, m
   // no-op from the admin's point of view. Also the only way to ever set course_name
   // on a group left NULL by the production migration script (the old single-group
   // schema never stored it). Check before the hot-path ingest, not after.
-  const activarText = textOf(m);
-  const parsedActivar = parseActivar(activarText);
+  const groupCommandText = textOf(m);
+  const parsedActivar = parseActivar(groupCommandText);
   if (parsedActivar) {
     const sender = m.key.participant;
     if (isAdminSender(sender)) {
@@ -208,6 +211,14 @@ async function route(sock: WASocket, botDb: Database, registry: GroupRegistry, m
       { chat, sender: maskJid(sender), adminJid: maskJid(config.adminJid) },
       '/activar attempted by non-admin (or unresolved sender), ignored',
     );
+  }
+
+  // Parents add their own kids' birthdays directly in the group -- checked before
+  // the hot-path ingest() below, same reason as /activar: the command text itself
+  // shouldn't also get stored as ordinary chat or picked up by nightly extraction.
+  if (/^\/cumple\b/i.test(groupCommandText.trim())) {
+    await handleGroupBirthday(sock, group, m, groupCommandText.trim().replace(/^\/cumple\s*/i, ''));
+    return;
   }
 
   // Hot path: local only, no network, sub-millisecond.
@@ -299,11 +310,10 @@ async function handleAdminCommand(sock: WASocket, registry: GroupRegistry, text:
       break;
     }
     case '/cumple': {
-      // /cumple <label> <nombre> <dd/mm>
+      // /cumple <label> <nombre...> <dd/mm> -- nombre supports multiple words.
       const group = requireGroup();
       if (!group) { await sock.sendMessage(config.adminJid, { text: 'Uso: /cumple <label> <nombre> <dd/mm>' }); break; }
-      const [name, date] = arg.split(/\s+/);
-      await sock.sendMessage(config.adminJid, { text: addBirthday(group.db, name, date) });
+      await sock.sendMessage(config.adminJid, { text: addBirthday(group.db, arg) });
       break;
     }
     case '/cumples': {
@@ -411,15 +421,64 @@ function listUnconfirmed(db: Database): string {
   }).join('\n');
 }
 
-function addBirthday(db: Database, name: string, date: string): string {
-  if (!name || !/^\d{1,2}\/\d{1,2}$/.test(date ?? '')) {
-    return 'Uso: /cumple <label> <nombre> <dd/mm>';
+function addBirthday(db: Database, arg: string): string {
+  const parsed = parseBirthdayArgs(arg);
+  if (!parsed) return 'Uso: /cumple <label> <nombre> <dd/mm>';
+  if (birthdayExists(db, parsed.name, parsed.day, parsed.month)) {
+    return `Ya tengo esa fecha guardada: ${parsed.name} — ${parsed.day}/${parsed.month}`;
   }
-  const [d, mo] = date.split('/').map(Number);
-  // Deliberately no year stored.
-  db.prepare('INSERT INTO birthdays (child_name, day, month, created_at) VALUES (?,?,?,?)')
-    .run(name, d, mo, Date.now());
-  return `Listo: ${name} — ${d}/${mo}`;
+  // Deliberately no year stored. No sender to attribute this to -- it's the admin,
+  // via DM, not a consented in-group parent (see handleGroupBirthday for that path).
+  insertBirthday(db, parsed.name, parsed.day, parsed.month, null);
+  return `Listo: ${parsed.name} — ${parsed.day}/${parsed.month}`;
+}
+
+/**
+ * Lets a consented parent add their own kid's birthday directly in the group,
+ * instead of routing every birthday through the admin's DM. Requires consent for
+ * the same reason ingest() does -- a parent who hasn't accepted shouldn't have
+ * their command processed either, so it's the same participants.consent_state
+ * check, just against this one command instead of the general chat pipeline.
+ */
+async function handleGroupBirthday(sock: WASocket, group: GroupContext, m: WAMessage, arg: string): Promise<void> {
+  const chat = group.jid;
+  const sender = m.key.participant ?? chat;
+  const participantId = resolveParticipant(group.db, sender);
+  const consent = (
+    group.db.prepare('SELECT consent_state FROM participants WHERE id = ?').get(participantId) as
+      { consent_state: string } | undefined
+  )?.consent_state;
+
+  if (consent !== 'granted') {
+    await sock.sendMessage(
+      chat,
+      { text: 'Primero debes aceptar las condiciones — responde *#acepto* a este chat.' },
+      { quoted: m },
+    );
+    return;
+  }
+
+  const parsed = parseBirthdayArgs(arg);
+  if (!parsed) {
+    await sock.sendMessage(chat, { text: 'Uso: /cumple <nombre> <dd/mm>' }, { quoted: m });
+    return;
+  }
+
+  if (birthdayExists(group.db, parsed.name, parsed.day, parsed.month)) {
+    await sock.sendMessage(
+      chat,
+      { text: `Ya tengo esa fecha guardada: ${parsed.name} — ${parsed.day}/${parsed.month}` },
+      { quoted: m },
+    );
+    return;
+  }
+
+  insertBirthday(group.db, parsed.name, parsed.day, parsed.month, participantId);
+  await sock.sendMessage(
+    chat,
+    { text: `Listo: ${parsed.name} — ${parsed.day}/${parsed.month} 🎂` },
+    { quoted: m },
+  );
 }
 
 /** Calendar order (month, then day), not insertion order — this is meant to read as a

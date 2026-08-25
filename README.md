@@ -113,6 +113,8 @@ parent who has not replied `#acepto` is stored at all** (`CONSENT_MODE=optin`).
 > • *#salir* — cancela tu participación cuando quieras (borra tus mensajes guardados).
 > • Mencióname (@) en cualquier mensaje para preguntarme algo — respondo con la
 >   información que tengo registrada.
+> • */cumple <nombre> <dd/mm>* — agrega el cumpleaños de un niño (sin año), por
+>   ejemplo /cumple Sofía 14/03.
 >
 > Cómo funciona:
 > • Los mensajes se borran a los 7 días; solo se guardan fechas y acuerdos importantes.
@@ -168,6 +170,14 @@ one reminder per extracted item for you to approve individually — same approva
 everything else. See `CLAUDE.md` invariant 4 for the health-content caveat on the photo
 path: the image is sent to Anthropic's API regardless of what it contains, since there's
 no way to check it locally before the model reads it.
+
+`/cumple` isn't admin-only in practice: any consented parent can send
+`/cumple <nombre> <dd/mm>` directly *in the group* to add their own kid's birthday —
+no DM, no label needed (the group it's sent in is the group it's added to). The nightly
+chat extraction also watches for birthday mentions in ordinary conversation and adds
+them the same way. Both paths, plus this admin DM command, write into the same table
+and skip an insert if that exact name + day/month is already stored, so using more
+than one path for the same kid doesn't duplicate them.
 
 ## Multiple groups
 

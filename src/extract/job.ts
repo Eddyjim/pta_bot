@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { bogotaDay } from '../util/dates.js';
+import { birthdayExists, insertBirthday } from '../birthdays.js';
 
 const client = new Anthropic({ apiKey: config.anthropicKey });
 
@@ -91,6 +92,24 @@ const EXTRACT_TOOL: Anthropic.Tool = {
           required: ['question', 'confidence', 'source_msg_ids'],
         },
       },
+      birthdays: {
+        type: 'array',
+        description:
+          'A child\'s birthday mentioned in ordinary chat (e.g. "el cumple de Sofi es el 14 de marzo"). ' +
+          'NEVER include or infer a birth year -- day and month only, no exceptions.',
+        items: {
+          type: 'object',
+          properties: {
+            child_name: { type: 'string' },
+            day: { type: 'number', description: '1-31' },
+            month: { type: 'number', description: '1-12' },
+            confidence: { type: 'number' },
+            source_excerpt: { type: 'string' },
+            source_msg_ids: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['child_name', 'day', 'month', 'confidence', 'source_excerpt', 'source_msg_ids'],
+        },
+      },
       day_summary: { type: 'string', description: '2-3 sentences, Spanish, neutral.' },
     },
     required: ['day_summary'],
@@ -105,6 +124,8 @@ Reglas:
 - Si una fecha es ambigua, baja la confianza en vez de adivinar.
 - Ignora saludos, agradecimientos, stickers y conversación social.
 - NUNCA registres información de salud de ningún niño, aunque aparezca.
+- Si alguien menciona el cumpleaños de un niño, regístralo en birthdays -- pero NUNCA
+  el año, ni lo preguntes ni lo infieras a partir de la edad. Solo día y mes.
 - Es correcto devolver listas vacías. Prefiere no registrar nada antes que registrar algo dudoso.`;
 
 /** Strip anything phone-number-shaped before the text leaves the machine. */
@@ -182,6 +203,18 @@ export async function runExtraction(db: Database, day = bogotaDay(-1)): Promise<
     store('money', out.money, 'due_date');
     store('decision', out.decisions);
     store('question', out.open_questions);
+
+    // Birthdays don't go through store()/facts -- they have their own dedicated
+    // table with no confidence/status tracking, same as the deterministic /cumple
+    // command's direct insert. birthdayExists() guards against the same casual
+    // mention getting extracted again on a later night before its source message
+    // is purged, or duplicating one a parent already added via /cumple.
+    for (const b of out.birthdays ?? []) {
+      if (b.confidence < CONFIDENCE_FLOOR) continue;
+      if (!b.child_name || b.day < 1 || b.day > 31 || b.month < 1 || b.month > 12) continue;
+      if (birthdayExists(db, b.child_name, b.day, b.month)) continue;
+      insertBirthday(db, b.child_name, b.day, b.month, null);
+    }
 
     db.prepare(
       `INSERT INTO daily_summaries (day, summary, msg_count, created_at)
