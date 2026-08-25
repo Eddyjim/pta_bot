@@ -360,6 +360,19 @@ async function handleAdminCommand(sock: WASocket, registry: GroupRegistry, text:
       await sock.sendMessage(config.adminJid, { text: addHomework(group.db, arg) });
       break;
     }
+    case '/pregunta': {
+      // /pregunta <label> <pregunta> -- same answerQuestion() the group's @mention
+      // already uses, just reachable from DM so the admin doesn't have to go into
+      // the group and @-mention the bot themselves to ask something.
+      const group = requireGroup();
+      if (!group || !arg.trim()) {
+        await sock.sendMessage(config.adminJid, { text: 'Uso: /pregunta <label> <pregunta>' });
+        break;
+      }
+      const reply = await answerQuestion(group.db, arg);
+      await sock.sendMessage(config.adminJid, { text: reply });
+      break;
+    }
     case '/ayuda':
     default:
       await sock.sendMessage(config.adminJid, {
@@ -367,6 +380,7 @@ async function handleAdminCommand(sock: WASocket, registry: GroupRegistry, text:
               '/cumples <label> — lista todos los cumpleaños guardados\n' +
               '/proximos <label> — recordatorios y cumpleaños de los próximos 30 días\n' +
               '/tarea <label> <descripción> <dd/mm/yyyy> — agrega una tarea o entrega directamente\n' +
+              '/pregunta <label> <pregunta> — pregunta lo que preguntarían los papás en el grupo\n' +
               '/correo <label> <texto> — extrae recordatorios de un correo pegado\n' +
               '/anuncio <label> <texto> — redacta un anuncio libre para aprobar antes de publicar\n' +
               'Envía una foto con el label como pie de foto — extrae recordatorios de un boletín escaneado\n/ayuda',

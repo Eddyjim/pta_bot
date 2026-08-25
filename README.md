@@ -163,6 +163,7 @@ coverage loss outweighs the exposure — the gate is one branch in `ingest/pipel
 | `/cumples <label>` | list every stored birthday, calendar order |
 | `/proximos <label>` | reminders and birthdays coming up in the next 30 days |
 | `/tarea <label> <descripción> <dd/mm/yyyy>` | add a homework/deliverable deadline directly |
+| `/pregunta <label> <pregunta>` | ask the same thing a parent's @mention would ask, from DM |
 | `/correo <label> <texto>` | extract reminders from a pasted email |
 | `/anuncio <label> <texto>` | draft a free-form announcement for you to approve |
 | send a photo, label as the caption | extract reminders from a newsletter screenshot |
