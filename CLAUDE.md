@@ -1,21 +1,39 @@
 # CLAUDE.md
 
 Context for working on this repo. Read before changing anything in `src/ingest/`,
-`src/db/`, or `src/whatsapp/connection.ts`.
+`src/db/`, `src/whatsapp/connection.ts`, `src/whatsapp/router.ts` (group
+registration/dispatch), or `src/groups.ts` (the in-memory group registry).
 
 ## What this is
 
-A WhatsApp assistant for a single Colombian class parent group (~25 parents). It reads
+A WhatsApp assistant for Colombian class parent groups (~25 parents each). It reads
 group chat, extracts actionable facts nightly with an LLM, and drafts reminders that the
 PTA rep approves before anything is posted. Runs as one Node process — a $6 DigitalOcean
 droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
-`systemd/pta-bot-pi.service`; see README). Not a product, not multi-tenant, never will be.
+`systemd/pta-bot-pi.service`; see README).
+
+**Multi-group, as of 2026-08-23 — this reverses an earlier "never will be" claim.**
+One process, one WhatsApp connection, one admin (the operator) now serve any number of
+registered groups (e.g. different sections/grades of the same school), each with its
+own course name and fully isolated data — own participants, consent state, facts,
+birthdays, drafts. Groups register themselves at runtime via an in-group admin command
+(`/activar <label> <curso>`), no restart or env var edit required. Still not a
+multi-tenant *product* in the sense of self-serve signup or per-group admins — there is
+exactly one admin, reviewing drafts for every group, by design (see the spec). The
+full reasoning — why the operator reversed the original single-group decision, why
+each group gets its own SQLite file instead of a shared one with a `group_id` column,
+and what was explicitly ruled out (per-group admins, per-group consent-mode/retention
+config, cross-group identity correlation) — lives in
+`docs/superpowers/specs/2026-08-23-multi-group-support-design.md`. Read it before
+touching group registration, dispatch, or the per-group/bot-level db split.
 
 ## Invariants — do not break these without explicit discussion
 
-1. **Nothing posts to the group without human approval.** Every outbound message goes
-   through `outbox` → the operator's DM → approval. There is no autonomous-posting path
-   and adding one is not an optimization.
+1. **Nothing posts to any group without human approval.** Every outbound message, for
+   every registered group, goes through that group's `outbox` → the one operator's DM →
+   approval. There is no autonomous-posting path and adding one is not an optimization.
+   Multi-group didn't change this invariant — it's still one approval gate, just
+   fed by N groups' outboxes instead of one.
 
 2. **Never key anything on a JID.** WhatsApp is migrating group participant identifiers
    from phone-number JIDs to `@lid`. `participant_jids` maps JIDs → `participants.id`;
@@ -27,7 +45,8 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
    `isMyJid()` checks both `sock.user.id` and `sock.user.lid` for exactly this reason.
    This fix is still correct and still load-bearing for `@bot`-mention detection (which
    had the identical single-form bug, never caught before since it had no real group
-   traffic to run against until `GROUP_JID` was configured) — but it turned out to be
+   traffic to run against until a group was configured — at the time via the now-removed
+   `GROUP_JID` env var, today via `/activar`) — but it turned out to be
    necessary, not sufficient, for the group-welcome feature it was originally added
    for. See the known-open-items entry on `group-participants.update` below: that
    feature was reverted for a deeper reason than this one. If you add another spot
@@ -73,18 +92,26 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
 
 ## Design decisions and why (so they aren't "improved" back)
 
-- **SQLite, not managed Postgres.** ~300 rows/day, one writer, working set under 2MB.
-  A network hop buys a second auth secret, a second outage surface, and cold starts.
+- **SQLite, not managed Postgres.** ~300 rows/day per group, one writer, working set
+  under 2MB per group — multi-group means N small files, not one bigger shared one
+  (see "Storage architecture" in the design spec for why per-file isolation was chosen
+  over a shared db with a `group_id` column). A network hop buys a second auth secret,
+  a second outage surface, and cold starts.
 - **No embeddings/vector store.** ~90 daily summaries + ~200 facts fit in context
-  trivially. Revisit only if the group grows 10×.
+  trivially. This is per group — each group's nightly extraction only ever looks at
+  that group's own data — so adding more groups means more (still cheap, Haiku) LLM
+  calls, not bigger ones. Revisit only if a single group's own traffic grows 10×.
 - **Nightly encrypted snapshots, not Litestream.** Worse RPO, but composes with
   encryption at rest, and losing a day of chatter is a non-event — facts are
-  re-derivable from the group scrollback.
+  re-derivable from the group scrollback. `scripts/backup.sh` snapshots every file this
+  applies to: the bot-level db and every registered group's db, one loop iteration each.
 - **In-process `node-cron`, not system cron.** Jobs need the live socket to DM the
-  operator, and a separate process would mean a second SQLite writer.
+  operator, and a separate process would mean a second writer against the same SQLite
+  files.
 - **Baileys auth state in SQLite**, not `useMultiFileAuthState`, so one backup covers
-  the pairing. Losing it means re-pairing by QR against the physical handset — the one
-  recovery step that can't be done remotely.
+  the pairing. This lives in the bot-level db (`bot.db`), never duplicated per group —
+  it's connection state, not group data. Losing it means re-pairing by QR against the
+  physical handset — the one recovery step that can't be done remotely.
 - **`facts.superseded_by` instead of UPDATE-in-place.** Parent groups change the meeting
   time four times; "the trip moved from Thursday to Friday" must stay answerable.
 - **`facts.source_excerpt` captured at extraction time.** `source_msg_ids` becomes a
@@ -93,8 +120,12 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
   deletes with a flat row count otherwise grow the file monotonically forever.
 - **Two-stage extraction.** Stage 1 is local heuristics, no network, sub-millisecond —
   a class group can produce 40 messages in ten seconds. Stage 2 is one batched LLM call
-  at 02:00. The only synchronous LLM call is an explicit `@bot` mention.
-- **Mentions only.** A bot that replies to ambient chatter gets muted by 25 people.
+  per registered group at 02:00 (the scheduler loops the registry, calling the same
+  unchanged per-group extraction function once per group — see "Scheduler" in the
+  design spec). The only synchronous LLM call is an explicit `@bot` mention.
+- **Mentions only.** A bot that replies to ambient chatter gets muted by 25 people —
+  true of any one group; more groups just means more groups each learning this the
+  same way, not a reason to relax it for any of them.
 
 ## Environment
 
@@ -129,12 +160,17 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
       `@lid` form for `chat === config.adminJid` to ever match; the phone-number form
       silently matched nothing (every admin message just got dropped, indistinguishable
       from no message arriving at all, until `router.ts`'s debug-level unmatched-DM log
-      was added to actually see it). `GROUP_JID` is unaffected — a group's own chat JID
-      is always `@g.us`; only 1:1/participant identifiers are subject to this. Still
-      open: `ADMIN_JID` only accepts one hardcoded value today, the same single-JID
-      fragility invariant 2 calls out for participants — worth the same
-      resolve-to-internal-id treatment if it flips again, rather than another manual
-      `.env` edit next time.
+      was added to actually see it). A group's own chat JID is unaffected — it's always
+      `@g.us`; only 1:1/participant identifiers are subject to this. (This is also why
+      the `groups` registry keys on the group's `@g.us` JID directly rather than needing
+      any `@lid` handling of its own — see the multi-group design spec.) Still open:
+      `ADMIN_JID` only accepts one hardcoded value today, the same single-JID fragility
+      invariant 2 calls out for participants — worth the same resolve-to-internal-id
+      treatment if it flips again, rather than another manual `.env` edit next time.
+      Multi-group made this sharper, not milder: one admin now reviews drafts for every
+      registered group (a deliberate non-goal, not an oversight — see the design spec's
+      "Admin scope" decision), so a wrong `ADMIN_JID` silently drops admin control over
+      *all* groups at once, not just one.
 - [ ] Health-pattern list is Spanish-only and keyword-based. It will miss things. It is
       a mitigation, not a guarantee — don't treat it as one.
 - [ ] `PAIRING_NUMBER` (pairing-code linking, `whatsapp/connection.ts`) is confirmed
@@ -162,12 +198,17 @@ droplet or a Raspberry Pi at home both work (`systemd/pta-bot.service` vs
       confirmed with certainty — would need live low-level tracing of the actual XML
       to be sure — but the code path points there, and it's the same "Baileys hasn't
       caught up to some `@lid` surface yet" pattern as the pairing-code bug. The
-      message-based `GROUP_JID` discovery log (a real chat message landing) is a
-      separate code path and is unaffected. Don't re-add a `group-participants.update`
-      handler without first confirming a Baileys release actually parses these
-      notifications for an `@lid`-addressed group.
+      message-based unregistered-group log (an ordinary chat message landing in a
+      `@g.us` chat not yet in the `groups` registry, logged at info level so the
+      operator notices) is a separate code path and is unaffected — registration itself
+      now happens via the explicit `/activar <label> <curso>` admin command over this
+      same `messages.upsert` path, not via any group-participants event; see the
+      multi-group design spec's "Why not `group-participants.update`" section. Don't
+      re-add a `group-participants.update` handler without first confirming a Baileys
+      release actually parses these notifications for an `@lid`-addressed group.
 
 ## Style
 
-TypeScript strict, ESM, no ORM, no DI framework. Nine tables and one writer. Comments
-explain *why*, not *what*.
+TypeScript strict, ESM, no ORM, no DI framework. Nine tables per group, plus three
+shared ones (`auth_state`, `heartbeat`, `groups`) in one bot-level db — one writer
+(this Node process) across all of them. Comments explain *why*, not *what*.

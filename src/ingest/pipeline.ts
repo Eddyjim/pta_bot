@@ -1,5 +1,5 @@
 import type { WAMessage } from '@whiskeysockets/baileys';
-import { db } from '../db/index.js';
+import type { Database } from 'better-sqlite3';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { stage1 } from './filter.js';
@@ -12,7 +12,7 @@ import { stage1 } from './filter.js';
  * keys on participants.id; JIDs are treated as mutable aliases. Getting this wrong
  * silently forks a parent into two people weeks later.
  */
-export function resolveParticipant(jid: string): number {
+export function resolveParticipant(db: Database, jid: string): number {
   const bare = jid.split(':')[0].split('/')[0];
   const existing = db
     .prepare('SELECT participant_id FROM participant_jids WHERE jid = ?')
@@ -36,7 +36,7 @@ export function resolveParticipant(jid: string): number {
 }
 
 /** Link a second JID (typically the @lid form) to an existing participant. */
-export function linkJid(jid: string, participantId: number): void {
+export function linkJid(db: Database, jid: string, participantId: number): void {
   db.prepare(
     `INSERT OR IGNORE INTO participant_jids (jid, participant_id, jid_type, first_seen)
      VALUES (?, ?, ?, ?)`,
@@ -55,17 +55,17 @@ function textOf(m: WAMessage): string | null {
   );
 }
 
-const insertMsg = () =>
+const insertMsg = (db: Database) =>
   db.prepare(`INSERT OR IGNORE INTO messages
     (id, participant_id, chat_jid, ts, body, quoted_id, passed_filter)
     VALUES (?, ?, ?, ?, ?, ?, ?)`);
 
-export function ingest(m: WAMessage): void {
+export function ingest(db: Database, m: WAMessage): void {
   const id = m.key.id;
   const sender = m.key.participant ?? m.key.remoteJid;
   if (!id || !sender || m.key.fromMe) return;
 
-  const participantId = resolveParticipant(sender);
+  const participantId = resolveParticipant(db, sender);
 
   const consent = (
     db.prepare('SELECT consent_state FROM participants WHERE id = ?').get(participantId) as any
@@ -108,7 +108,7 @@ export function ingest(m: WAMessage): void {
   // Health-flagged content is dropped entirely — not stored unfiltered "just in case".
   if (result.verdict === 'drop' && result.reason === 'health') return;
 
-  insertMsg().run(
+  insertMsg(db).run(
     id,
     participantId,
     m.key.remoteJid,

@@ -18,18 +18,15 @@ function clampHour(v: string | undefined, fallback: number): number {
 }
 
 export const config = {
-  // Optional at boot, unlike everything else req()'d here: on first run there IS no
-  // group JID yet — the documented flow is start the bot, let it log the JID once a
-  // group message arrives, then set this and restart. An empty string never matches a
-  // real JID, so router.ts's `chat !== config.groupJid` check safely ignores every
-  // group until this is set.
-  groupJid: process.env.GROUP_JID ?? '',
   adminJid: req('ADMIN_JID'),
   consentMode: (process.env.CONSENT_MODE ?? 'optin') as 'optin' | 'optout',
   anthropicKey: req('ANTHROPIC_API_KEY'),
   extractionModel: process.env.EXTRACTION_MODEL ?? 'claude-haiku-4-5-20251001',
   answerModel: process.env.ANSWER_MODEL ?? 'claude-haiku-4-5-20251001',
-  dbPath: process.env.DB_PATH ?? './pta.db',
+  // Directory holding bot.db (pairing/heartbeat/registry) and one group-<label>.db
+  // per registered group. Not a single file anymore -- multi-group support means
+  // there's no longer one database, there's one per group plus a shared one.
+  dbDir: process.env.DB_DIR ?? './data',
   tz: 'America/Bogota',
   logLevel: process.env.LOG_LEVEL ?? 'info',
   rawRetentionDays: Number(process.env.RAW_RETENTION_DAYS ?? 7),
@@ -44,12 +41,6 @@ export const config = {
   // 573001234567. Unset by default; harmless to leave set after pairing succeeds,
   // since it's only ever used while the socket isn't yet registered.
   pairingNumber: process.env.PAIRING_NUMBER,
-  // Restricts extract/email.ts to items relevant to this course. Unset = no filtering
-  // (backward compatible). School-wide newsletters often cover every grade in one
-  // document; this is meant for a single deployment's one class, not general-purpose
-  // grade parsing — see the system prompt in extract/email.ts for how variants like
-  // "2-A", "2A", "2nd A" are handled without enumerating every notation here.
-  courseName: process.env.COURSE_NAME,
   optInKeyword: '#acepto',
   optOutKeyword: '#salir',
 } as const;

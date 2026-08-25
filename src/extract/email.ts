@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { db } from '../db/index.js';
+import type { Database } from 'better-sqlite3';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { bogotaDay, formatSpanish } from '../util/dates.js';
@@ -94,12 +94,12 @@ const EXTRACT_TOOL: Anthropic.Tool = {
   },
 };
 
-function buildSystem(): string {
-  const courseNote = config.courseName ? `
+function buildSystem(courseName: string | null): string {
+  const courseNote = courseName ? `
 
-Este salón es "${config.courseName}". Los boletines a veces cubren varios cursos en un
+Este salón es "${courseName}". Los boletines a veces cubren varios cursos en un
 solo documento. Marca course_relevant=false SOLO en ítems que mencionen explícitamente
-OTRO curso o grado. Trata como equivalentes a "${config.courseName}" cualquier notación
+OTRO curso o grado. Trata como equivalentes a "${courseName}" cualquier notación
 razonable del mismo grado y sección — por ejemplo "2do A", "2-A", "2A", "2° A",
 "segundo A", "grado 2A", "2nd A" son todas la misma cosa si el curso es "2nd A". Si
 solo se menciona el grado sin sección (p. ej. "2do" cuando el curso es "2nd A") y el
@@ -152,7 +152,7 @@ function textFieldsOf(it: any): string[] {
     .filter((v): v is string => typeof v === 'string');
 }
 
-const insertFact = () => db.prepare(
+const insertFact = (db: Database) => db.prepare(
   `INSERT INTO facts (kind, payload, effective_date, confidence, source_excerpt,
                       source_msg_ids, status, created_at)
    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -167,8 +167,13 @@ const insertFact = () => db.prepare(
  * it IS the only guard: there's no text to regex until the model has already read the
  * photo, so this is what stands between a health-flagged extraction and storage.
  */
-export async function processExtraction(out: any): Promise<{ draftCount: number; healthDropped: number; courseDropped: number }> {
-  const insert = insertFact();
+export async function processExtraction(
+  db: Database,
+  courseName: string | null,
+  targetJid: string,
+  out: any,
+): Promise<{ draftCount: number; healthDropped: number; courseDropped: number }> {
+  const insert = insertFact(db);
   let draftCount = 0;
   let healthDropped = 0;
   let courseDropped = 0;
@@ -183,11 +188,7 @@ export async function processExtraction(out: any): Promise<{ draftCount: number;
   for (const [kind, items, dateKey] of kinds) {
     for (const it of items) {
       if (it.confidence < CONFIDENCE_FLOOR) continue;
-      // course_relevant is only meaningful when courseName is configured — the model
-      // has nothing to compare against otherwise, and processExtraction() shouldn't
-      // silently start dropping items the moment courseName is unset (it defaults to
-      // true/absent in that case, same as if the field were never in the schema).
-      if (config.courseName && it.course_relevant === false) {
+      if (courseName && it.course_relevant === false) {
         courseDropped++;
         continue;
       }
@@ -209,7 +210,7 @@ export async function processExtraction(out: any): Promise<{ draftCount: number;
       ).lastInsertRowid as number;
 
       const text = KIND_TEXT[kind](it);
-      await draft('email', `*📧 Del correo* (#${factId})\n\n• ${text}`);
+      await draft(db, targetJid, 'email', `*📧 Del correo* (#${factId})\n\n• ${text}`);
       draftCount++;
     }
   }
@@ -217,11 +218,11 @@ export async function processExtraction(out: any): Promise<{ draftCount: number;
   return { draftCount, healthDropped, courseDropped };
 }
 
-function extractCall(content: Anthropic.MessageParam['content']): Promise<Anthropic.Message> {
+function extractCall(system: string, content: Anthropic.MessageParam['content']): Promise<Anthropic.Message> {
   return client.messages.create({
     model: config.extractionModel,
     max_tokens: 4000,
-    system: buildSystem(),
+    system,
     tools: [EXTRACT_TOOL],
     tool_choice: { type: 'tool', name: 'record_email_facts' },
     messages: [{ role: 'user', content }],
@@ -233,25 +234,34 @@ function toolInputOf(res: Anthropic.Message): any | null {
   return call && call.type === 'tool_use' ? call.input : null;
 }
 
-export async function extractFromEmailText(rawText: string): Promise<EmailExtractResult> {
-  // Checked first and unconditionally, before any network call — same discipline as
-  // ingest/pipeline.ts applies to chat messages.
+export async function extractFromEmailText(
+  db: Database,
+  courseName: string | null,
+  targetJid: string,
+  rawText: string,
+): Promise<EmailExtractResult> {
   if (hasHealthContent(rawText)) return { ok: false, reason: 'health' };
 
-  const res = await extractCall([
+  const res = await extractCall(buildSystem(courseName), [
     { type: 'text', text: `Fecha de referencia: ${bogotaDay()}\n\nCorreo:\n${scrub(rawText)}` },
   ]);
   const out = toolInputOf(res);
   if (!out) { log.error('email text extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0, courseDropped: 0 }; }
 
-  const { draftCount, healthDropped, courseDropped } = await processExtraction(out);
+  const { draftCount, healthDropped, courseDropped } = await processExtraction(db, courseName, targetJid, out);
   return { ok: true, draftCount, healthDropped, courseDropped };
 }
 
-export async function extractFromEmailImage(image: Buffer, mimetype: string | null | undefined): Promise<EmailExtractResult> {
+export async function extractFromEmailImage(
+  db: Database,
+  courseName: string | null,
+  targetJid: string,
+  image: Buffer,
+  mimetype: string | null | undefined,
+): Promise<EmailExtractResult> {
   const mediaType = IMAGE_MEDIA_TYPES.has(mimetype ?? '') ? (mimetype as any) : 'image/jpeg';
 
-  const res = await extractCall([
+  const res = await extractCall(buildSystem(courseName), [
     {
       type: 'image',
       source: { type: 'base64', media_type: mediaType, data: image.toString('base64') },
@@ -264,6 +274,6 @@ export async function extractFromEmailImage(image: Buffer, mimetype: string | nu
   const out = toolInputOf(res);
   if (!out) { log.error('email image extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0, courseDropped: 0 }; }
 
-  const { draftCount, healthDropped, courseDropped } = await processExtraction(out);
+  const { draftCount, healthDropped, courseDropped } = await processExtraction(db, courseName, targetJid, out);
   return { ok: true, draftCount, healthDropped, courseDropped };
 }

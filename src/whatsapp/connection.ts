@@ -1,9 +1,10 @@
 import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import type { WASocket } from '@whiskeysockets/baileys';
 import type { Boom } from '@hapi/boom';
+import type { Database } from 'better-sqlite3';
 import qrcode from 'qrcode-terminal';
 import { useSQLiteAuthState } from '../db/auth-state.js';
-import { heartbeat } from '../db/index.js';
+import { botHeartbeat } from '../db/index.js';
 import { log } from '../logger.js';
 import { config } from '../config.js';
 
@@ -22,9 +23,10 @@ function backoffMs(n: number): number {
 }
 
 export async function connect(
+  botDb: Database,
   onReady: (sock: WASocket) => void,
 ): Promise<void> {
-  const { state, saveCreds } = useSQLiteAuthState();
+  const { state, saveCreds } = useSQLiteAuthState(botDb);
   const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
@@ -58,13 +60,13 @@ export async function connect(
 
     if (connection === 'open') {
       attempt = 0;
-      heartbeat(true);
+      botHeartbeat(botDb, true);
       log.info('connected');
       onReady(sock!);
     }
 
     if (connection === 'close') {
-      heartbeat(false);
+      botHeartbeat(botDb, false);
       const code = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
 
       // TERMINAL. The pairing was revoked on the phone. Retrying looks like abuse
@@ -92,7 +94,7 @@ export async function connect(
 
       const delay = backoffMs(attempt++);
       log.warn({ code, attempt, delay }, 'disconnected, reconnecting');
-      setTimeout(() => connect(onReady).catch(e => log.error(e, 'reconnect failed')), delay);
+      setTimeout(() => connect(botDb, onReady).catch(e => log.error(e, 'reconnect failed')), delay);
     }
   });
 }
