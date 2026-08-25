@@ -163,6 +163,7 @@ coverage loss outweighs the exposure — the gate is one branch in `ingest/pipel
 | `/proximos <label>` | reminders and birthdays coming up in the next 30 days |
 | `/tarea <label> <descripción> <dd/mm/yyyy>` | add a homework/deliverable deadline directly |
 | `/correo <label> <texto>` | extract reminders from a pasted email |
+| `/anuncio <label> <texto>` | draft a free-form announcement for you to approve |
 | send a photo, label as the caption | extract reminders from a newsletter screenshot |
 
 Both `/correo` and the photo path extract into the same `facts` table the nightly chat

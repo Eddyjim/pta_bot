@@ -4,7 +4,7 @@ import type { Database } from 'better-sqlite3';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { ingest, resolveParticipant } from '../ingest/pipeline.js';
-import { resolveReply } from '../outbox/index.js';
+import { draft, resolveReply } from '../outbox/index.js';
 import { answerQuestion, tryConsumeCooldown } from '../extract/answer.js';
 import { extractFromEmailText, extractFromEmailImage } from '../extract/email.js';
 import { upcoming, birthdaysWithin } from '../scheduler/index.js';
@@ -158,6 +158,13 @@ async function route(sock: WASocket, botDb: Database, registry: GroupRegistry, m
       // Only strip the command token — the rest, including line breaks, is the
       // pasted email body and must survive intact for extraction.
       await handleEmailText(sock, registry, text.trim().replace(/^\/correo\s*/i, ''));
+      return;
+    }
+
+    if (/^\/anuncio\b/i.test(text.trim())) {
+      // Same reason as /correo: only strip the command token, everything else
+      // (including line breaks) is the announcement text verbatim.
+      await handleAnnouncement(sock, registry, text.trim().replace(/^\/anuncio\s*/i, ''));
       return;
     }
 
@@ -361,6 +368,7 @@ async function handleAdminCommand(sock: WASocket, registry: GroupRegistry, text:
               '/proximos <label> — recordatorios y cumpleaños de los próximos 30 días\n' +
               '/tarea <label> <descripción> <dd/mm/yyyy> — agrega una tarea o entrega directamente\n' +
               '/correo <label> <texto> — extrae recordatorios de un correo pegado\n' +
+              '/anuncio <label> <texto> — redacta un anuncio libre para aprobar antes de publicar\n' +
               'Envía una foto con el label como pie de foto — extrae recordatorios de un boletín escaneado\n/ayuda',
       });
   }
@@ -432,6 +440,29 @@ async function handleEmailImage(sock: WASocket, registry: GroupRegistry, m: WAMe
     log.error({ e }, 'email image extraction failed');
     await sock.sendMessage(config.adminJid, { text: 'No pude procesar la imagen. Intenta de nuevo.' });
   }
+}
+
+/**
+ * Lets the admin draft an arbitrary announcement for a group through the exact
+ * same approval flow as every other outbound message (draft() -> admin DM ->
+ * reply ok/no/edited-text) -- see CLAUDE.md invariant 1. There is no path here
+ * that posts directly; draft() only ever DMs you the draft, and resolveReply()
+ * (already wired into route()'s admin-DM branch above) is what actually sends it,
+ * and only once you reply.
+ */
+async function handleAnnouncement(sock: WASocket, registry: GroupRegistry, text: string): Promise<void> {
+  // Same split as /correo: first whitespace run separates the label from the
+  // announcement text, which keeps its line breaks intact.
+  const match = text.replace(/^\s+/, '').match(/^(\S+)\s+([\s\S]*)$/);
+  const label = match?.[1];
+  const body = match?.[2] ?? '';
+  const group = label ? registry.findByLabel(label) : undefined;
+
+  if (!group || !body.trim()) {
+    await sock.sendMessage(config.adminJid, { text: 'Uso: /anuncio <label> <texto>.' });
+    return;
+  }
+  await draft(group.db, group.jid, 'anuncio', body);
 }
 
 function listUnconfirmed(db: Database): string {
