@@ -72,10 +72,27 @@ export async function answerQuestion(db: Database, question: string): Promise<st
     const res = await client.messages.create({
       model: config.answerModel,
       max_tokens: 400,
+      // Real incident (2026-08-25): asked "cuándo cumple @Uriel" (a WhatsApp
+      // @-mention -- this context has no mapping from mentioned JIDs to stored
+      // birthdays, and never should, per the pseudonym-only rule), the model
+      // answered "Andrés Felipe cumple el 31 de agosto" -- a different name than
+      // asked about, matching NEITHER the question nor anything actually stored.
+      // A pure fabrication, not a misread record. temperature: 0 (was unset,
+      // defaulting to Anthropic's max of 1.0 -- the least grounded setting
+      // possible for a feature whose entire job is "answer only from this data,
+      // or say you don't know") plus an explicit instruction against exactly
+      // this failure mode: substituting a different name/date that merely looks
+      // related instead of admitting the asked-about one isn't there.
+      temperature: 0,
       system:
-        'Respondes preguntas de padres sobre el salón, usando SOLO el contexto dado. ' +
-        'Responde corto (2-3 frases), en español, y menciona la fecha de la fuente. ' +
-        'Si el contexto no contiene la respuesta, dilo claramente y no inventes.',
+        'Respondes preguntas de padres sobre el salón, usando SOLO el contexto dado -- ' +
+        'nunca tu conocimiento general ni suposiciones. Responde corto (2-3 frases), en ' +
+        'español, y menciona la fecha de la fuente. Si preguntan por una persona, ' +
+        'cumpleaños, o dato específico que no aparece TEXTUALMENTE en el contexto, di ' +
+        'claramente "No tengo esa información registrada" -- NUNCA sustituyas con otro ' +
+        'nombre o fecha del contexto que parezca relacionado, aunque sea de la misma ' +
+        'categoría (por ejemplo, otro cumpleaños). Inventar un dato es un error grave, ' +
+        'mucho peor que admitir que no lo sabes.',
       messages: [{ role: 'user', content: `${context}\n\n---\nPregunta: ${question}` }],
     }, { timeout: 15_000 });
 
