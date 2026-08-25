@@ -213,16 +213,34 @@ async function route(sock: WASocket, botDb: Database, registry: GroupRegistry, m
     );
   }
 
-  // Parents add their own kids' birthdays directly in the group -- checked before
-  // the hot-path ingest() below, same reason as /activar: the command text itself
-  // shouldn't also get stored as ordinary chat or picked up by nightly extraction.
-  if (/^\/cumple\b/i.test(groupCommandText.trim())) {
-    await handleGroupBirthday(sock, group, m, groupCommandText.trim().replace(/^\/cumple\s*/i, ''));
+  // Real-world usage: parents commonly send #acepto and /cumple in the SAME
+  // message (e.g. "#acepto\n/cumple Sofía 14/03"), not two separate ones. /cumple
+  // is matched anywhere in the message, not just at the start, so this still works.
+  // Whether the message ALSO carries a consent keyword decides the order below --
+  // consent is evaluated in exactly one place (ingest/pipeline.ts), never
+  // duplicated here; this only reads config's keyword strings to route correctly.
+  const cumpleMatch = groupCommandText.match(/\/cumple\s+(.+)/is);
+  const hasConsentKeyword =
+    groupCommandText.toLowerCase().includes(config.optInKeyword) ||
+    groupCommandText.toLowerCase().includes(config.optOutKeyword);
+
+  if (cumpleMatch && !hasConsentKeyword) {
+    // A pure /cumple command, nothing consent-relevant in the same message --
+    // skip ingest() entirely so the command text itself never becomes stored
+    // chat or gets picked up by nightly extraction, same as /activar above.
+    await handleGroupBirthday(sock, group, m, cumpleMatch[1]);
     return;
   }
 
-  // Hot path: local only, no network, sub-millisecond.
+  // Hot path: local only, no network, sub-millisecond. Runs before the /cumple
+  // check below when the message also has a consent keyword, so #acepto/#salir
+  // is honored first -- handleGroupBirthday then sees the just-updated state.
   ingest(group.db, m);
+
+  if (cumpleMatch) {
+    await handleGroupBirthday(sock, group, m, cumpleMatch[1]);
+    return;
+  }
 
   // The one synchronous LLM call. Mentions only — a bot that answers ambient
   // chatter is the fastest way to get itself muted by 25 people.
