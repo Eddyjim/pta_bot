@@ -120,7 +120,8 @@ parent who has not replied `#acepto` is stored at all** (`CONSENT_MODE=optin`).
 > • Los cumpleaños se guardan solo con nombre y día/mes, sin año.
 > • Nada se publica aquí sin que el administrador lo revise primero.
 >
-> Uso la API de Anthropic (Claude) para procesar los textos.
+> Uso la API de Anthropic (Claude) para procesar los textos, pero todo lo que
+> guardo vive en un servidor privado, no en los servidores de Anthropic.
 
 (Verbatim — this is the `WELCOME_MESSAGE` constant in `src/whatsapp/router.ts`, not a
 paraphrase. If you edit the wire text, update this block too so they don't drift apart.)

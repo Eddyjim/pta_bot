@@ -28,7 +28,8 @@ Cómo funciona:
 • Los cumpleaños se guardan solo con nombre y día/mes, sin año.
 • Nada se publica aquí sin que el administrador lo revise primero.
 
-Uso la API de Anthropic (Claude) para procesar los textos.`;
+Uso la API de Anthropic (Claude) para procesar los textos, pero todo lo que
+guardo vive en un servidor privado, no en los servidores de Anthropic.`;
 
 function textOf(m: WAMessage): string {
   const msg = m.message;
