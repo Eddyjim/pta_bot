@@ -49,10 +49,19 @@ export async function answerQuestion(db: Database, question: string): Promise<st
 
   const faq = db.prepare('SELECT question, answer FROM faq').all() as any[];
 
+  // Birthdays live in their own table, not in facts -- easy to miss here, and it
+  // was missed: @bot had zero visibility into birthdays despite /cumple and passive
+  // extraction both populating this table correctly. Same format as listAllBirthdays.
+  const birthdays = db.prepare(
+    'SELECT child_name, day, month FROM birthdays ORDER BY month, day',
+  ).all() as any[];
+
   const context = [
     `Hoy es ${bogotaDay()}.`,
     '## Hechos registrados',
     ...facts.map(f => `- [${f.kind}] ${f.payload}`),
+    '## Cumpleaños',
+    ...birthdays.map(b => `- 🎂 ${b.child_name} — ${b.day}/${b.month}`),
     '## Resúmenes diarios',
     ...summaries.map(s => `- ${s.day}: ${s.summary}`),
     '## Preguntas frecuentes',
