@@ -16,3 +16,4 @@ dist/
 # Runtime
 *.db
 *.db-journal
+.backups/
