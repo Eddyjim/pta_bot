@@ -328,12 +328,20 @@ async function handleAdminCommand(sock: WASocket, registry: GroupRegistry, text:
       await sock.sendMessage(config.adminJid, { text: listUpcoming(group.db) });
       break;
     }
+    case '/tarea': {
+      // /tarea <label> <descripción> <dd/mm/yyyy>
+      const group = requireGroup();
+      if (!group) { await sock.sendMessage(config.adminJid, { text: 'Uso: /tarea <label> <descripción> <dd/mm/yyyy>' }); break; }
+      await sock.sendMessage(config.adminJid, { text: addHomework(group.db, arg) });
+      break;
+    }
     case '/ayuda':
     default:
       await sock.sendMessage(config.adminJid, {
         text: '/pendientes <label> — hechos por confirmar\n/cumple <label> <nombre> <dd/mm>\n' +
               '/cumples <label> — lista todos los cumpleaños guardados\n' +
               '/proximos <label> — recordatorios y cumpleaños de los próximos 30 días\n' +
+              '/tarea <label> <descripción> <dd/mm/yyyy> — agrega una tarea o entrega directamente\n' +
               '/correo <label> <texto> — extrae recordatorios de un correo pegado\n' +
               'Envía una foto con el label como pie de foto — extrae recordatorios de un boletín escaneado\n/ayuda',
       });
@@ -431,6 +439,54 @@ function addBirthday(db: Database, arg: string): string {
   // via DM, not a consented in-group parent (see handleGroupBirthday for that path).
   insertBirthday(db, parsed.name, parsed.day, parsed.month, null);
   return `Listo: ${parsed.name} — ${parsed.day}/${parsed.month}`;
+}
+
+/**
+ * Parses "<descripción...> <dd/mm/yyyy>" for /tarea -- everything except the
+ * trailing full date is the description (naturally includes the subject, e.g.
+ * "Matemáticas: ejercicios 1-10 página 45"). Requires the full year, unlike
+ * /cumple's dd/mm: a deadline is a real calendar date facts.effective_date sorts
+ * and filters against (upcoming()'s BETWEEN comparison), not a yearless recurring
+ * day/month the way a birthday is.
+ */
+function parseHomeworkArgs(arg: string): { what: string; dueDate: string } | null {
+  const match = arg.trim().match(/^(.+)\s+(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return null;
+  const what = match[1].trim();
+  if (!what) return null;
+  const day = Number(match[2]);
+  const month = Number(match[3]);
+  const year = Number(match[4]);
+  if (day < 1 || day > 31 || month < 1 || month > 12) return null;
+  const dueDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return { what, dueDate };
+}
+
+/**
+ * Direct admin entry for a homework/deliverable deadline -- same directness as
+ * /cumple: no confidence floor, no draft/review, confirmed immediately so it shows
+ * up in /proximos and the digest right away, same shape a nightly-extracted
+ * deadline would have (kind: 'deadline', who_must_act: 'students') so it's
+ * indistinguishable from one once stored.
+ */
+function addHomework(db: Database, arg: string): string {
+  const parsed = parseHomeworkArgs(arg);
+  if (!parsed) return 'Uso: /tarea <label> <descripción> <dd/mm/yyyy>';
+  db.prepare(
+    `INSERT INTO facts (kind, payload, effective_date, confidence, source_excerpt,
+                        source_msg_ids, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    'deadline',
+    JSON.stringify({ what: parsed.what, due_date: parsed.dueDate, who_must_act: 'students' }),
+    parsed.dueDate,
+    1,
+    null,
+    '[]',
+    'confirmed',
+    Date.now(),
+  );
+  return `Listo: ${parsed.what} — vence ${formatSpanish(parsed.dueDate)}`;
 }
 
 /**

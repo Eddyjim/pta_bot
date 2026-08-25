@@ -126,6 +126,9 @@ Reglas:
 - NUNCA registres información de salud de ningún niño, aunque aparezca.
 - Si alguien menciona el cumpleaños de un niño, regístralo en birthdays -- pero NUNCA
   el año, ni lo preguntes ni lo infieras a partir de la edad. Solo día y mes.
+- Las tareas y trabajos escolares (qué hay que entregar y para cuándo) son
+  "deadlines" con who_must_act: "students" -- no las descartes como conversación
+  social solo porque no son un evento del salón en sí.
 - Es correcto devolver listas vacías. Prefiere no registrar nada antes que registrar algo dudoso.`;
 
 /** Strip anything phone-number-shaped before the text leaves the machine. */

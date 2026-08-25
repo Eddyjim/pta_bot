@@ -161,6 +161,7 @@ coverage loss outweighs the exposure — the gate is one branch in `ingest/pipel
 | `/cumple <label> Sofía 14/03` | add a birthday |
 | `/cumples <label>` | list every stored birthday, calendar order |
 | `/proximos <label>` | reminders and birthdays coming up in the next 30 days |
+| `/tarea <label> <descripción> <dd/mm/yyyy>` | add a homework/deliverable deadline directly |
 | `/correo <label> <texto>` | extract reminders from a pasted email |
 | send a photo, label as the caption | extract reminders from a newsletter screenshot |
 
@@ -178,6 +179,14 @@ chat extraction also watches for birthday mentions in ordinary conversation and 
 them the same way. Both paths, plus this admin DM command, write into the same table
 and skip an insert if that exact name + day/month is already stored, so using more
 than one path for the same kid doesn't duplicate them.
+
+Homework and other deliverables use the existing `deadline` fact type (`who_must_act:
+"students"`) rather than a table of their own — both the nightly chat extraction and
+`/correo`/photo newsletter extraction already watch for them there, so most homework
+never needs `/tarea` at all; it exists for the times a parent mentions it too casually
+for the model to catch, or you'd rather not wait for the nightly pass. Unlike `/cumple`,
+`/tarea` needs the full date including year — a deadline is a real calendar date, not
+a yearless recurring one.
 
 ## Multiple groups
 

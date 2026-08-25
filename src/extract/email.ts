@@ -118,6 +118,8 @@ Reglas:
 - Ignora saludos, membretes, logos y contenido puramente informativo sin fecha, plazo,
   costo o decisión asociada.
 - NUNCA registres información de salud de ningún niño, aunque aparezca en el texto o la imagen.
+- Las tareas y trabajos escolares (qué hay que entregar y para cuándo) son "deadlines"
+  con who_must_act: "students".
 - Es correcto devolver listas vacías. Prefiere no registrar nada antes que registrar algo dudoso.${courseNote}`;
 }
 
