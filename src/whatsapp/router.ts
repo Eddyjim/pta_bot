@@ -396,15 +396,16 @@ function summarizeEmailResult(result: EmailResult): string {
   }
 
   const notes: string[] = [];
-  if (result.healthDropped > 0) notes.push(`${result.healthDropped} por ser de salud`);
-  if (result.courseDropped > 0) notes.push(`${result.courseDropped} de otro curso`);
+  if (result.healthDropped > 0) notes.push(`se descartó ${result.healthDropped} por ser de salud`);
+  if (result.courseDropped > 0) notes.push(`se descartó ${result.courseDropped} de otro curso`);
+  if (result.duplicateSkipped > 0) notes.push(`${result.duplicateSkipped} ya estaba(n) registrado(s) sin cambios`);
 
   if (result.draftCount === 0) {
     return notes.length
-      ? `⚠️ Se descartó ${notes.join(' y ')}. No quedó nada más para compartir.`
+      ? `⚠️ ${notes.join('; ')}. No quedó nada más para compartir.`
       : 'No encontré nada accionable.';
   }
-  const suffix = notes.length ? ` (se descartó ${notes.join(' y ')})` : '';
+  const suffix = notes.length ? ` (${notes.join('; ')})` : '';
   return `Listo — ${result.draftCount} borrador(es) arriba para revisar${suffix}.`;
 }
 

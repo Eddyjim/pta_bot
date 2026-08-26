@@ -6,6 +6,7 @@ import { bogotaDay, formatSpanish } from '../util/dates.js';
 import { hasHealthContent } from '../ingest/filter.js';
 import { draft } from '../outbox/index.js';
 import { CONFIDENCE_FLOOR, AUTO_CONFIRM, scrub } from './job.js';
+import { storeFact } from './facts.js';
 
 const client = new Anthropic({ apiKey: config.anthropicKey });
 
@@ -136,7 +137,7 @@ Reglas:
 
 type EmailExtractResult =
   | { ok: false; reason: 'health' }
-  | { ok: true; draftCount: number; healthDropped: number; courseDropped: number };
+  | { ok: true; draftCount: number; healthDropped: number; courseDropped: number; duplicateSkipped: number };
 
 const IMAGE_MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
@@ -165,12 +166,6 @@ function textFieldsOf(it: any): string[] {
     .filter((v): v is string => typeof v === 'string');
 }
 
-const insertFact = (db: Database) => db.prepare(
-  `INSERT INTO facts (kind, payload, effective_date, confidence, source_excerpt,
-                      source_msg_ids, status, created_at)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-);
-
 /**
  * Shared by both the pasted-text and image paths: store each item that clears the
  * confidence floor and the health check, then draft one outbox reminder per item.
@@ -185,11 +180,11 @@ export async function processExtraction(
   courseName: string | null,
   targetJid: string,
   out: any,
-): Promise<{ draftCount: number; healthDropped: number; courseDropped: number }> {
-  const insert = insertFact(db);
+): Promise<{ draftCount: number; healthDropped: number; courseDropped: number; duplicateSkipped: number }> {
   let draftCount = 0;
   let healthDropped = 0;
   let courseDropped = 0;
+  let duplicateSkipped = 0;
 
   const kinds: Array<[string, any[], string | undefined]> = [
     ['event', out.events ?? [], 'date'],
@@ -211,24 +206,34 @@ export async function processExtraction(
         continue;
       }
 
-      const factId = insert.run(
+      // storeFact() dedupes against existing non-superseded facts of the same
+      // kind (see extract/facts.ts) -- the same newsletter re-pasted produces
+      // no new row and no new draft; a genuinely changed item supersedes the
+      // old fact instead of sitting beside it as a duplicate.
+      const { outcome, factId } = storeFact(
+        db,
         kind,
-        JSON.stringify(it),
+        it,
         dateKey ? it[dateKey] ?? null : null,
         it.confidence,
         (it.source_excerpt ?? '').slice(0, 200),
-        JSON.stringify(['email']),
+        ['email'],
         it.confidence >= AUTO_CONFIRM ? 'confirmed' : 'unconfirmed',
-        Date.now(),
-      ).lastInsertRowid as number;
+      );
+
+      if (outcome === 'skipped-duplicate') {
+        duplicateSkipped++;
+        continue;
+      }
 
       const text = KIND_TEXT[kind](it);
-      await draft(db, targetJid, 'email', `*📧 Del correo* (#${factId})\n\n• ${text}`);
+      const label = outcome === 'updated' ? '🔄 *Actualización del correo*' : '*📧 Del correo*';
+      await draft(db, targetJid, 'email', `${label} (#${factId})\n\n• ${text}`);
       draftCount++;
     }
   }
 
-  return { draftCount, healthDropped, courseDropped };
+  return { draftCount, healthDropped, courseDropped, duplicateSkipped };
 }
 
 function extractCall(system: string, content: Anthropic.MessageParam['content']): Promise<Anthropic.Message> {
@@ -259,10 +264,10 @@ export async function extractFromEmailText(
     { type: 'text', text: `Fecha de referencia: ${bogotaDay()}\n\nCorreo:\n${scrub(rawText)}` },
   ]);
   const out = toolInputOf(res);
-  if (!out) { log.error('email text extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0, courseDropped: 0 }; }
+  if (!out) { log.error('email text extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0, courseDropped: 0, duplicateSkipped: 0 }; }
 
-  const { draftCount, healthDropped, courseDropped } = await processExtraction(db, courseName, targetJid, out);
-  return { ok: true, draftCount, healthDropped, courseDropped };
+  const { draftCount, healthDropped, courseDropped, duplicateSkipped } = await processExtraction(db, courseName, targetJid, out);
+  return { ok: true, draftCount, healthDropped, courseDropped, duplicateSkipped };
 }
 
 export async function extractFromEmailImage(
@@ -285,8 +290,8 @@ export async function extractFromEmailImage(
     },
   ]);
   const out = toolInputOf(res);
-  if (!out) { log.error('email image extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0, courseDropped: 0 }; }
+  if (!out) { log.error('email image extraction returned no tool call'); return { ok: true, draftCount: 0, healthDropped: 0, courseDropped: 0, duplicateSkipped: 0 }; }
 
-  const { draftCount, healthDropped, courseDropped } = await processExtraction(db, courseName, targetJid, out);
-  return { ok: true, draftCount, healthDropped, courseDropped };
+  const { draftCount, healthDropped, courseDropped, duplicateSkipped } = await processExtraction(db, courseName, targetJid, out);
+  return { ok: true, draftCount, healthDropped, courseDropped, duplicateSkipped };
 }

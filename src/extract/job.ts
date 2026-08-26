@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { log } from '../logger.js';
 import { bogotaDay } from '../util/dates.js';
 import { birthdayExists, insertBirthday } from '../birthdays.js';
+import { storeFact } from './facts.js';
 
 const client = new Anthropic({ apiKey: config.anthropicKey });
 
@@ -187,27 +188,27 @@ export async function runExtraction(db: Database, day = bogotaDay(-1)): Promise<
   }
   const out = call.input as any;
 
-  const insertFact = db.prepare(
-    `INSERT INTO facts (kind, payload, effective_date, confidence, source_excerpt,
-                        source_msg_ids, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
+  const factCounts: Record<string, number> = {};
 
   const store = (kind: string, items: any[] = [], dateKey?: string) => {
     for (const it of items) {
       if (it.confidence < CONFIDENCE_FLOOR) continue;
-      insertFact.run(
+      // storeFact() dedupes against existing non-superseded facts of the same
+      // kind (see extract/facts.ts) -- an unchanged repeat is skipped outright,
+      // a changed one supersedes the old row instead of sitting beside it.
+      const { outcome } = storeFact(
+        db,
         kind,
-        JSON.stringify(it),
+        it,
         dateKey ? it[dateKey] ?? null : null,
         it.confidence,
         // Provenance excerpt is captured NOW: source_msg_ids becomes a dangling
         // pointer once the 7-day raw purge runs.
         (it.source_excerpt ?? '').slice(0, 200),
-        JSON.stringify(it.source_msg_ids ?? []),
+        it.source_msg_ids ?? [],
         it.confidence >= AUTO_CONFIRM ? 'confirmed' : 'unconfirmed',
-        Date.now(),
       );
+      factCounts[outcome] = (factCounts[outcome] ?? 0) + 1;
     }
   };
 
@@ -239,5 +240,5 @@ export async function runExtraction(db: Database, day = bogotaDay(-1)): Promise<
     for (const r of rows) mark.run(Date.now(), r.id);
   })();
 
-  log.info({ day, messages: rows.length }, 'extraction complete');
+  log.info({ day, messages: rows.length, ...factCounts }, 'extraction complete');
 }
